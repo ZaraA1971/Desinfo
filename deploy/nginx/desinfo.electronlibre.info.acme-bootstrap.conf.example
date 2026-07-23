@@ -1,0 +1,18 @@
+# ACME bootstrap stub (HTTP only). NOT the production TLS vhost.
+# Production: desinfo.electronlibre.info.conf
+
+# Bootstrap HTTP only — ACME challenge
+server {
+    listen 80;
+    listen [::]:80;
+    server_name desinfo.electronlibre.info;
+
+    root /var/www/desinfo;
+    location /.well-known/acme-challenge/ {
+        allow all;
+    }
+    location / {
+        return 200 'desinfo bootstrap';
+        add_header Content-Type text/plain;
+    }
+}

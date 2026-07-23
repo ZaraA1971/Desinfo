@@ -1,0 +1,156 @@
+generated_at: '2026-07-23T10:45:01.536337+00:00'
+window_days: 365
+min_cn: 3
+media:
+- id: reuters_fr
+  name: Reuters
+  domains:
+  - reuters.com
+  - fr.reuters.com
+  x_handle: Reuters
+  rank_bootstrap: 1
+  cn_365d: 1279
+- id: france24
+  name: France 24
+  domains:
+  - france24.com
+  x_handle: France24_fr
+  rank_bootstrap: 4
+  cn_365d: 154
+- id: franceinfo
+  name: franceinfo
+  domains:
+  - francetvinfo.fr
+  - franceinfo.fr
+  x_handle: franceinfo
+  rank_bootstrap: 5
+  cn_365d: 115
+- id: lci
+  name: LCI
+  domains:
+  - lci.fr
+  - tf1info.fr
+  x_handle: LCI
+  rank_bootstrap: 6
+  cn_365d: 92
+- id: leparisien
+  name: Le Parisien
+  domains:
+  - leparisien.fr
+  x_handle: le_Parisien
+  rank_bootstrap: 7
+  cn_365d: 92
+- id: bfmtv
+  name: BFMTV
+  domains:
+  - bfmtv.com
+  x_handle: BFMTV
+  rank_bootstrap: 8
+  cn_365d: 90
+- id: lefigaro
+  name: Le Figaro
+  domains:
+  - lefigaro.fr
+  x_handle: Le_Figaro
+  rank_bootstrap: 9
+  cn_365d: 77
+- id: 20minutes
+  name: 20 Minutes
+  domains:
+  - 20minutes.fr
+  x_handle: 20Minutes
+  rank_bootstrap: 10
+  cn_365d: 53
+- id: huffpost_fr
+  name: HuffPost France
+  domains:
+  - huffingtonpost.fr
+  - huffpost.com
+  x_handle: LeHuffPost
+  rank_bootstrap: 11
+  cn_365d: 52
+- id: cnews
+  name: CNews
+  domains:
+  - cnews.fr
+  x_handle: CNEWS
+  rank_bootstrap: 12
+  cn_365d: 48
+- id: afp_factuel
+  name: AFP Factuel
+  domains:
+  - factuel.afp.com
+  x_handle: AFPfactuel
+  rank_bootstrap: 15
+  cn_365d: 29
+- id: point
+  name: Le Point
+  domains:
+  - lepoint.fr
+  x_handle: LePoint
+  rank_bootstrap: 16
+  cn_365d: 28
+- id: lesechos
+  name: Les Échos
+  domains:
+  - lesechos.fr
+  x_handle: LesEchos
+  rank_bootstrap: 18
+  cn_365d: 23
+- id: rtl
+  name: RTL
+  domains:
+  - rtl.fr
+  x_handle: RTLFrance
+  rank_bootstrap: 19
+  cn_365d: 17
+- id: rfi
+  name: RFI
+  domains:
+  - rfi.fr
+  x_handle: RFI
+  rank_bootstrap: 20
+  cn_365d: 15
+- id: express
+  name: L'Express
+  domains:
+  - lexpress.fr
+  x_handle: LExpress
+  rank_bootstrap: 22
+  cn_365d: 12
+- id: ladepeche
+  name: La Dépêche
+  domains:
+  - ladepeche.fr
+  x_handle: ladepechedumidi
+  rank_bootstrap: 23
+  cn_365d: 12
+- id: humanite
+  name: L'Humanité
+  domains:
+  - humanite.fr
+  x_handle: humanite_fr
+  rank_bootstrap: 26
+  cn_365d: 9
+- id: rmc
+  name: RMC
+  domains:
+  - rmc.bfmtv.com
+  - rmc.fr
+  x_handle: RMCInfo
+  rank_bootstrap: 27
+  cn_365d: 8
+- id: europe1
+  name: Europe 1
+  domains:
+  - europe1.fr
+  x_handle: Europe1
+  rank_bootstrap: 31
+  cn_365d: 4
+- id: slate_fr
+  name: Slate.fr
+  domains:
+  - slate.fr
+  x_handle: slatefr
+  rank_bootstrap: 33
+  cn_365d: 3

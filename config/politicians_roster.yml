@@ -1,0 +1,117 @@
+# Candidats déclarés — présidentielle 2027
+# Source de référence : France 24 (mis à jour 2026-07-10, 22 déclarés).
+# Roster souverain : éditer ici ; pas de bootstrap auto.
+election: "2027"
+source: "https://www.france24.com/fr/france/20260524-france-presidentielle-2027-qui-sont-les-candidats-officiellement-declares"
+updated_at: "2026-07-23"
+candidates:
+  - id: nathalie_arthaud
+    name: Nathalie Arthaud
+    party: Lutte ouvrière
+    x_handle: n_arthaud
+    aliases: ["Nathalie Arthaud", "@n_arthaud"]
+  - id: francois_asselineau
+    name: François Asselineau
+    party: UPR
+    x_handle: UPR_Asselineau
+    aliases: ["François Asselineau", "Francois Asselineau", "@UPR_Asselineau"]
+  - id: gabriel_attal
+    name: Gabriel Attal
+    party: Renaissance
+    x_handle: GabrielAttal
+    aliases: ["Gabriel Attal", "@GabrielAttal"]
+  - id: clementine_autain
+    name: Clémentine Autain
+    party: L’Après
+    x_handle: Clem_Autain
+    aliases: ["Clémentine Autain", "Clementine Autain", "@Clem_Autain"]
+  - id: delphine_batho
+    name: Delphine Batho
+    party: Génération écologie
+    x_handle: delphinebatho
+    aliases: ["Delphine Batho", "@delphinebatho"]
+  - id: xavier_bertrand
+    name: Xavier Bertrand
+    party: Nous France
+    x_handle: xavierbertrand
+    aliases: ["Xavier Bertrand", "@xavierbertrand"]
+  - id: karim_bouamrane
+    name: Karim Bouamrane
+    party: Parti socialiste
+    x_handle: KarimBouamrane
+    aliases: ["Karim Bouamrane", "@KarimBouamrane"]
+  - id: juan_branco
+    name: Juan Branco
+    party: Les Ruches
+    x_handle: juanbranco
+    aliases: ["Juan Branco", "@juanbranco"]
+  - id: nicolas_dupont_aignan
+    name: Nicolas Dupont-Aignan
+    party: Debout la France
+    x_handle: dupontaignan
+    aliases: ["Nicolas Dupont-Aignan", "Dupont-Aignan", "@dupontaignan"]
+  - id: clara_egger
+    name: Clara Egger
+    party: Solution démocratique
+    x_handle: ClaraEgger
+    aliases: ["Clara Egger", "@ClaraEgger"]
+  - id: jerome_guedj
+    name: Jérôme Guedj
+    party: Parti socialiste
+    x_handle: JeromeGuedj
+    aliases: ["Jérôme Guedj", "Jerome Guedj", "@JeromeGuedj"]
+  - id: anasse_kazib
+    name: Anasse Kazib
+    party: Révolution permanente
+    x_handle: AnasseKazib
+    aliases: ["Anasse Kazib", "@AnasseKazib"]
+  - id: marine_le_pen
+    name: Marine Le Pen
+    party: Rassemblement national
+    x_handle: MLP_officiel
+    aliases: ["Marine Le Pen", "@MLP_officiel"]
+  - id: david_lisnard
+    name: David Lisnard
+    party: Nouvelle Énergie
+    x_handle: davidlisnard
+    aliases: ["David Lisnard", "@davidlisnard"]
+  - id: lydie_massard
+    name: Lydie Massard
+    party: Union démocratique bretonne
+    x_handle: null
+    aliases: ["Lydie Massard"]
+  - id: jean_luc_melenchon
+    name: Jean-Luc Mélenchon
+    party: La France insoumise
+    x_handle: JLMelenchon
+    aliases: ["Jean-Luc Mélenchon", "Jean Luc Mélenchon", "Mélenchon", "Melenchon", "@JLMelenchon"]
+  - id: edouard_philippe
+    name: Édouard Philippe
+    party: Horizons
+    x_handle: EdouardPhilippe
+    aliases: ["Édouard Philippe", "Edouard Philippe", "@EdouardPhilippe", "@Edouard_Philippe"]
+  - id: florian_philippot
+    name: Florian Philippot
+    party: Les Patriotes
+    x_handle: f_philippot
+    aliases: ["Florian Philippot", "@f_philippot"]
+  - id: bruno_retailleau
+    name: Bruno Retailleau
+    party: Les Républicains
+    x_handle: BrunoRetailleau
+    aliases: ["Bruno Retailleau", "@BrunoRetailleau"]
+  - id: segolene_royal
+    name: Ségolène Royal
+    party: Parti socialiste
+    x_handle: RoyalSegolene
+    aliases: ["Ségolène Royal", "Segolene Royal", "@RoyalSegolene"]
+  - id: francois_ruffin
+    name: François Ruffin
+    party: Debout !
+    x_handle: Francois_Ruffin
+    aliases: ["François Ruffin", "Francois Ruffin", "@Francois_Ruffin"]
+  - id: marine_tondelier
+    name: Marine Tondelier
+    party: Les Écologistes
+    x_handle: marinetondelier
+    aliases: ["Marine Tondelier", "@marinetondelier"]

@@ -1,0 +1,38 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Secrets & local env (never commit)
+.env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+
+# Runtime data
+data/desinfo.db
+data/desinfo.db-*
+data/raw/
+data/snapshots/
+data/exports_emails*.csv
+data/*.log
+!data/snapshots/.gitkeep
+!data/raw/.gitkeep
+
+# OS / IDE
+.DS_Store
+*.swp
+.idea/
+.vscode/
+*.pem
+*.key
+id_rsa*

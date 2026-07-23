@@ -1,0 +1,191 @@
+media:
+- id: lefigaro
+  name: Le Figaro
+  domains:
+  - lefigaro.fr
+  x_handle: Le_Figaro
+- id: leparisien
+  name: Le Parisien
+  domains:
+  - leparisien.fr
+  x_handle: le_Parisien
+- id: lesechos
+  name: Les Échos
+  domains:
+  - lesechos.fr
+  x_handle: LesEchos
+- id: humanite
+  name: L'Humanité
+  domains:
+  - humanite.fr
+  x_handle: humanite_fr
+- id: mediapart_blogs
+  name: Mediapart (blogs)
+  domains:
+  - blogs.mediapart.fr
+  x_handle: Mediapart
+- id: reuters_fr
+  name: Reuters
+  domains:
+  - reuters.com
+  - fr.reuters.com
+  x_handle: Reuters
+- id: franceinfo
+  name: franceinfo
+  domains:
+  - francetvinfo.fr
+  - franceinfo.fr
+  x_handle: franceinfo
+- id: france24
+  name: France 24
+  domains:
+  - france24.com
+  x_handle: France24_fr
+- id: rfi
+  name: RFI
+  domains:
+  - rfi.fr
+  x_handle: RFI
+- id: europe1
+  name: Europe 1
+  domains:
+  - europe1.fr
+  x_handle: Europe1
+- id: rtl
+  name: RTL
+  domains:
+  - rtl.fr
+  x_handle: RTLFrance
+- id: rmc
+  name: RMC
+  domains:
+  - rmc.bfmtv.com
+  - rmc.fr
+  x_handle: RMCInfo
+- id: bfmtv
+  name: BFMTV
+  domains:
+  - bfmtv.com
+  x_handle: BFMTV
+- id: cnews
+  name: CNews
+  domains:
+  - cnews.fr
+  x_handle: CNEWS
+- id: lci
+  name: LCI
+  domains:
+  - lci.fr
+  - tf1info.fr
+  x_handle: LCI
+- id: tf1
+  name: TF1
+  domains:
+  - tf1.fr
+  x_handle: TF1
+- id: franceinter
+  name: France Inter
+  domains:
+  - franceinter.fr
+  x_handle: franceinter
+- id: franceculture
+  name: France Culture
+  domains:
+  - franceculture.fr
+  x_handle: franceculture
+- id: france2
+  name: France 2
+  domains:
+  - france.tv
+  x_handle: France2tv
+- id: arte
+  name: Arte
+  domains:
+  - arte.tv
+  x_handle: ARTEfr
+- id: marianne
+  name: Marianne
+  domains:
+  - marianne.net
+  x_handle: MarianneMagazine
+- id: express
+  name: L'Express
+  domains:
+  - lexpress.fr
+  x_handle: LExpress
+- id: point
+  name: Le Point
+  domains:
+  - lepoint.fr
+  x_handle: LePoint
+- id: slate_fr
+  name: Slate.fr
+  domains:
+  - slate.fr
+  x_handle: slatefr
+- id: huffpost_fr
+  name: HuffPost France
+  domains:
+  - huffingtonpost.fr
+  - huffpost.com
+  x_handle: LeHuffPost
+- id: 20minutes
+  name: 20 Minutes
+  domains:
+  - 20minutes.fr
+  x_handle: 20Minutes
+- id: ladepeche
+  name: La Dépêche
+  domains:
+  - ladepeche.fr
+  x_handle: ladepechedumidi
+- id: lavie
+  name: La Vie
+  domains:
+  - lavie.fr
+  x_handle: laviefr
+- id: valeurs
+  name: Valeurs Actuelles
+  domains:
+  - valeursactuelles.com
+  x_handle: Valeurs
+- id: causeur
+  name: Causeur
+  domains:
+  - causeur.fr
+  x_handle: Causeur_fr
+- id: boulevard_voltaire
+  name: Boulevard Voltaire
+  domains:
+  - bvoltaire.fr
+  x_handle: BVoltaire
+- id: mediapart_checknews
+  name: CheckNews (Libération)
+  domains:
+  - checknews.fr
+  x_handle: liberation_info
+- id: afp_factuel
+  name: AFP Factuel
+  domains:
+  - factuel.afp.com
+  x_handle: AFPfactuel
+- id: lesjours
+  name: Les Jours
+  domains:
+  - lesjours.fr
+  x_handle: LesJoursfr
+- id: arrêtsurimages
+  name: Arrêt sur images
+  domains:
+  - arretsurimages.net
+  x_handle: arretsurimages
+- id: streetpress
+  name: StreetPress
+  domains:
+  - streetpress.com
+  x_handle: StreetPress
+- id: alternatives_economiques
+  name: Alternatives Économiques
+  domains:
+  - alternatives-economiques.fr
+  x_handle: AlterEco_fr

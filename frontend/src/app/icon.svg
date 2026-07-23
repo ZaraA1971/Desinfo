@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="desinfo">
+  <rect width="32" height="32" rx="6" fill="#f3efe6"/>
+  <text
+    x="16"
+    y="24"
+    text-anchor="middle"
+    font-family="Libre Baskerville, Georgia, 'Times New Roman', serif"
+    font-size="22"
+    font-weight="700"
+    fill="#0f6b4c"
+  >d</text>
+</svg>

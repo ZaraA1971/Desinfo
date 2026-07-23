@@ -1,0 +1,13 @@
+[Unit]
+Description=desinfo weekly X 7d harvest + cascade windows
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/desinfo
+EnvironmentFile=-/srv/desinfo/.env
+Environment=DESINFO_ROOT=/srv/desinfo
+ExecStart=/srv/desinfo/venv/bin/python /srv/desinfo/scripts/sync_x_weekly.py
+Nice=10
+StandardOutput=journal
+StandardError=journal

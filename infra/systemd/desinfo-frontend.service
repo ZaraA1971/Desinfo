@@ -1,0 +1,23 @@
+[Unit]
+Description=desinfo Next.js frontend
+After=network.target desinfo-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/srv/desinfo/frontend
+Environment=NODE_ENV=production
+Environment=PORT=8710
+Environment=DESINFO_API_HOST=127.0.0.1
+Environment=DESINFO_API_PORT=8700
+EnvironmentFile=-/srv/desinfo/.env
+ExecStart=/srv/desinfo/frontend/node_modules/.bin/next start -H 127.0.0.1 -p 8710
+KillMode=control-group
+TimeoutStopSec=60
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

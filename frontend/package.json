@@ -1,0 +1,22 @@
+{
+  "name": "desinfo-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 8710",
+    "build": "next build",
+    "start": "next start -H 127.0.0.1 -p 8710",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^15.0.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.17.6",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "^18",
+    "typescript": "5.8.2"
+  }
+}

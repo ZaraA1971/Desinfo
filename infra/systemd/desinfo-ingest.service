@@ -1,0 +1,13 @@
+[Unit]
+Description=desinfo Community Notes ingest + score
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/desinfo
+EnvironmentFile=-/srv/desinfo/.env
+Environment=DESINFO_ROOT=/srv/desinfo
+ExecStart=/srv/desinfo/venv/bin/python /srv/desinfo/scripts/ingest_daily.py
+Nice=10
+StandardOutput=journal
+StandardError=journal
