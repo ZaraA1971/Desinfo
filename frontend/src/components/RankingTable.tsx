@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   MetricMode,
   RankingItem,
@@ -9,6 +9,7 @@ import {
   formatRatio,
   itemKey,
 } from "@/lib/api";
+import { ThemeRadar } from "@/components/ThemeRadar";
 
 type SortKey = "cn" | "posts" | "cn_per_post" | "post_per_cn";
 type SortDir = "desc" | "asc";
@@ -17,6 +18,7 @@ type Props = {
   items: RankingItem[];
   metricMode: MetricMode | string;
   entityLabel?: string;
+  showRadar?: boolean;
 };
 
 function numOrNeg(v: number | null | undefined): number {
@@ -86,15 +88,18 @@ export function RankingTable({
   items,
   metricMode,
   entityLabel = "Média",
+  showRadar = false,
 }: Props) {
   const defaultKey: SortKey =
     metricMode === "post_cn" ? "cn_per_post" : "cn";
   const [sortKey, setSortKey] = useState<SortKey>(defaultKey);
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [openKey, setOpenKey] = useState<string | null>(null);
 
   useEffect(() => {
     setSortKey(defaultKey);
     setSortDir("desc");
+    setOpenKey(null);
   }, [defaultKey, items]);
 
   const onSort = (key: SortKey) => {
@@ -119,6 +124,7 @@ export function RankingTable({
   }
 
   const showDelta = sortKey === defaultKey && sortDir === "desc";
+  const colSpan = 6;
 
   return (
     <div className="table-wrap">
@@ -162,37 +168,57 @@ export function RankingTable({
         </thead>
         <tbody>
           {sorted.map((item, idx) => {
+            const key = itemKey(item);
             const delta = item.delta_rank;
             const deltaClass =
               delta == null || delta === 0 ? "" : delta > 0 ? "up" : "down";
+            const isOpen = showRadar && openKey === key;
+            const clickable = showRadar && !!item.radar;
             return (
-              <tr key={itemKey(item)}>
-                <td className="rank">
-                  {idx + 1}
-                  {showDelta && delta != null && (
-                    <span className={`delta ${deltaClass}`}>{formatDelta(delta)}</span>
-                  )}
-                </td>
-                <td>
-                  <span className="media-name">{item.name}</span>
-                  {item.party && <span className="handle">{item.party}</span>}
-                  {item.x_handle && (
-                    <span className="handle">@{item.x_handle}</span>
-                  )}
-                </td>
-                <td className="num hide-sm">{item.cn_count}</td>
-                <td className="num">
-                  {item.post_count == null ? "—" : item.post_count}
-                </td>
-                <td className="num">
-                  {metricMode === "post_cn"
-                    ? formatCnPerPost(item.rate_cn_per_post)
-                    : item.cn_count}
-                </td>
-                <td className="num hide-sm">
-                  {formatRatio(item.ratio_post_per_cn)}
-                </td>
-              </tr>
+              <Fragment key={key}>
+                <tr
+                  className={clickable ? "row-clickable" : undefined}
+                  onClick={
+                    clickable
+                      ? () => setOpenKey(isOpen ? null : key)
+                      : undefined
+                  }
+                  aria-expanded={clickable ? isOpen : undefined}
+                >
+                  <td className="rank">
+                    {idx + 1}
+                    {showDelta && delta != null && (
+                      <span className={`delta ${deltaClass}`}>{formatDelta(delta)}</span>
+                    )}
+                  </td>
+                  <td>
+                    <span className="media-name">{item.name}</span>
+                    {item.party && <span className="handle">{item.party}</span>}
+                    {item.x_handle && (
+                      <span className="handle">@{item.x_handle}</span>
+                    )}
+                  </td>
+                  <td className="num hide-sm">{item.cn_count}</td>
+                  <td className="num">
+                    {item.post_count == null ? "—" : item.post_count}
+                  </td>
+                  <td className="num">
+                    {metricMode === "post_cn"
+                      ? formatCnPerPost(item.rate_cn_per_post)
+                      : item.cn_count}
+                  </td>
+                  <td className="num hide-sm">
+                    {formatRatio(item.ratio_post_per_cn)}
+                  </td>
+                </tr>
+                {isOpen && item.radar && (
+                  <tr className="radar-row">
+                    <td colSpan={colSpan}>
+                      <ThemeRadar name={item.name} radar={item.radar} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             );
           })}
         </tbody>

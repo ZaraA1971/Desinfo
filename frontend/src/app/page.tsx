@@ -9,6 +9,7 @@ import {
   RankingKind,
   RankingSnapshot,
   WINDOWS,
+  WindowKey,
   fetchMeta,
   fetchRanking,
 } from "@/lib/api";
@@ -17,29 +18,45 @@ function parseKind(raw: string | null): RankingKind {
   return raw === "politicians" ? "politicians" : "media";
 }
 
+function parseWindow(raw: string | null, fallback = "7d"): string {
+  if (raw && (WINDOWS as readonly string[]).includes(raw)) return raw;
+  return fallback;
+}
+
 function HomePageInner() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const kind = parseKind(searchParams.get("kind"));
 
-  const [windowKey, setWindowKey] = useState<string | null>(null);
+  const kind = parseKind(searchParams.get("kind"));
+  const windowKey = parseWindow(searchParams.get("window"), "7d");
+
   const [snap, setSnap] = useState<RankingSnapshot | null>(null);
   const [meta, setMeta] = useState<MetaResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  const replaceParams = (next: { kind?: RankingKind; window?: string }) => {
+    const params = new URLSearchParams(searchParams.toString());
+    const nextKind = next.kind ?? kind;
+    const nextWindow = next.window ?? windowKey;
+
+    if (nextKind === "media") params.delete("kind");
+    else params.set("kind", nextKind);
+
+    if (nextWindow === "7d") params.delete("window");
+    else params.set("window", nextWindow);
+
+    const q = params.toString();
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  };
 
   useEffect(() => {
     startTransition(() => {
       (async () => {
         try {
           setError(null);
-          if (windowKey === null) {
-            const m = await fetchMeta();
-            setMeta(m);
-            setWindowKey(m.default_window || "7d");
-            return;
-          }
+          setSnap(null);
           const [m, r] = await Promise.all([
             fetchMeta(),
             fetchRanking(windowKey, kind),
@@ -55,16 +72,12 @@ function HomePageInner() {
 
   const onKindChange = (next: RankingKind) => {
     if (next === kind) return;
-    setSnap(null);
-    setWindowKey(null);
-    const params = new URLSearchParams(searchParams.toString());
-    if (next === "media") {
-      params.delete("kind");
-    } else {
-      params.set("kind", next);
-    }
-    const q = params.toString();
-    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    replaceParams({ kind: next });
+  };
+
+  const onWindowChange = (w: string) => {
+    if (w === windowKey) return;
+    replaceParams({ window: w });
   };
 
   const generated = snap?.generated_at
@@ -131,7 +144,7 @@ function HomePageInner() {
 
       <div className="toolbar">
         <div className="windows" role="group" aria-label="Fenêtre">
-          {WINDOWS.map((w) => {
+          {WINDOWS.map((w: WindowKey) => {
             const mode = ready[w] || "cn_only";
             return (
               <button
@@ -143,7 +156,7 @@ function HomePageInner() {
                     ? "CN/Post disponible"
                     : "CN only pour l’instant"
                 }
-                onClick={() => setWindowKey(w)}
+                onClick={() => onWindowChange(w)}
               >
                 {w}
                 {mode === "post_cn" ? " ✓" : ""}
@@ -169,6 +182,7 @@ function HomePageInner() {
           items={snap.items}
           metricMode={snap.metric_mode}
           entityLabel={kind === "politicians" ? "Candidat" : "Média"}
+          showRadar={kind === "media"}
         />
       )}
       {!error && !snap && !pending && (
@@ -194,6 +208,12 @@ function HomePageInner() {
           Métrique principale : <strong>CN / Posts</strong>. Fenêtre par défaut
           : 7 jours (médias et candidats). Les fenêtres 30/90/365 se
           remplissent ensuite par cascade depuis les collectes hebdomadaires.
+        </p>
+        <p>
+          Profil thématique (médias) : radar à 8 axes (politique, santé,
+          économie, justice, international, science, technologie, faits
+          divers). Longueur des branches proportionnelle au nombre de CN du
+          média sur chaque thème. Classification LLM en fin d’ingest quotidien.
         </p>
         {meta && (
           <p>

@@ -57,9 +57,25 @@ class Settings:
             "DESINFO_PUBLIC_URL", "https://desinfo.electronlibre.info"
         )
 
+        # Theme classification (OpenAI) — radar médias
+        self.openai_api_key: str | None = os.environ.get("OPENAI_API_KEY") or None
+        self.openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        self.openai_base_url: str = os.environ.get(
+            "OPENAI_BASE_URL", "https://api.openai.com/v1"
+        )
+        self.openai_timeout_seconds: float = float(
+            os.environ.get("OPENAI_TIMEOUT_SECONDS", "90")
+        )
+        self.theme_batch_size: int = int(os.environ.get("DESINFO_THEME_BATCH_SIZE", "20"))
+        self.theme_max_per_run: int = int(os.environ.get("DESINFO_THEME_MAX_PER_RUN", "800"))
+
     @property
     def x_api_configured(self) -> bool:
         return bool(self.x_bearer_token or (self.x_api_key and self.x_api_secret))
+
+    @property
+    def openai_configured(self) -> bool:
+        return bool(self.openai_api_key)
 
 
 @lru_cache

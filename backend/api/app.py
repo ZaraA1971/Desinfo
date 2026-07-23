@@ -194,12 +194,30 @@ def meta(request: Request) -> dict[str, Any]:
     roster = load_media_roster()
     politicians = load_politicians_roster()
     last_ingest = None
+    last_theme = None
+    theme_classified = 0
+    theme_pending = 0
     windows_ready: dict[str, str] = {}
     politicians_windows_ready: dict[str, str] = {}
 
     try:
         with db_session() as conn:
             last_ingest = get_meta(conn, "last_ingest_at")
+            last_theme = get_meta(conn, "last_theme_classify_at")
+            theme_classified = int(
+                conn.execute("SELECT COUNT(*) AS n FROM note_theme").fetchone()["n"]
+            )
+            theme_pending = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT n.note_id) AS n
+                    FROM notes n
+                    JOIN note_media nm ON nm.note_id = n.note_id
+                    LEFT JOIN note_theme nt ON nt.note_id = n.note_id
+                    WHERE n.is_helpful=1 AND nt.note_id IS NULL
+                    """
+                ).fetchone()["n"]
+            )
             rows = conn.execute(
                 """
                 SELECT window_key, COUNT(*) AS n
@@ -256,6 +274,10 @@ def meta(request: Request) -> dict[str, Any]:
         "roster_generated_at": roster.get("generated_at"),
         "last_ingest_at": last_ingest,
         "last_snapshot_at": (default_snap or {}).get("generated_at"),
+        "last_theme_classify_at": last_theme,
+        "theme_classified": theme_classified,
+        "theme_pending": theme_pending,
+        "openai_themes_configured": settings.openai_configured,
         "metric_mode": (default_snap or {}).get("metric_mode", "cn_only"),
         "kinds": list(KINDS),
     }

@@ -40,6 +40,16 @@ CREATE TABLE IF NOT EXISTS note_media (
 
 CREATE INDEX IF NOT EXISTS idx_note_media_media ON note_media(media_id);
 
+CREATE TABLE IF NOT EXISTS note_theme (
+    note_id TEXT PRIMARY KEY,
+    theme TEXT NOT NULL,
+    model TEXT,
+    scored_at TEXT NOT NULL,
+    FOREIGN KEY (note_id) REFERENCES notes(note_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_theme_theme ON note_theme(theme);
+
 CREATE TABLE IF NOT EXISTS media_posts_daily (
     media_id TEXT NOT NULL,
     day TEXT NOT NULL,

@@ -404,6 +404,111 @@ footer {
   font-size: 0.85rem;
 }
 
+.row-clickable {
+  cursor: pointer;
+}
+
+.row-clickable:hover {
+  background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+}
+
+.radar-row td {
+  padding: 0.75rem 0.5rem 1.25rem;
+  background: color-mix(in srgb, var(--paper) 40%, white);
+  border-bottom: 1px solid var(--line);
+}
+
+.radar-panel {
+  animation: rise 400ms ease both;
+}
+
+.radar-centiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.85rem;
+  align-items: baseline;
+  margin-bottom: 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.radar-centiles-name {
+  font-weight: 700;
+  color: var(--accent);
+  margin-right: 0.35rem;
+}
+
+.radar-centile {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 3.4rem;
+}
+
+.radar-centile-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.radar-centile-val {
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.radar-chart-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  overflow: visible;
+}
+
+.radar-svg {
+  width: min(440px, 100%);
+  height: auto;
+  overflow: visible;
+  display: block;
+}
+
+.radar-ring,
+.radar-spoke {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.radar-poly {
+  fill: color-mix(in srgb, var(--accent) 18%, transparent);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.radar-node {
+  fill: var(--accent);
+}
+
+.radar-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-body), sans-serif;
+}
+
+.radar-caption {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.radar-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
 @media (max-width: 640px) {
   .shell {
     padding-top: 1.5rem;

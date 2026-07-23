@@ -21,3 +21,4 @@ Source de vérité : `cursor.md` à la racine du projet.
 12. X posts : sync **7d hebdo** (`desinfo-x-sync.timer`) ; 30/90/365 = cascade depuis `media_posts_daily` (pas d’API longue).
 13. Signets UI : **Médias** | **Candidats 2027** (`?kind=`) ; roster candidats = déclarés seulement (`politicians_roster.yml`) ; défaut fenêtre = `7d` pour les deux.
 14. Snapshots = `latest_*.json` atomiques seulement ; meta `next_x_sync_at` pour la prochaine moisson.
+15. Radar médias : thèmes LLM (`note_theme`) en fin d’ingest ; extérieur = plus de CN (centile vs roster).

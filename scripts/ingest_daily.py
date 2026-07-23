@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily CN ingest + score (+ emails CSV). X sync is weekly — see sync_x_weekly.py."""
+"""Daily CN ingest + theme classify + score (+ emails CSV). X sync is weekly."""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +15,7 @@ from backend.ingest.pipeline import run_ingest
 from backend.politicians.rank import score_all_politicians_windows
 from backend.scoring.bootstrap import bootstrap_roster
 from backend.scoring.rank import score_all_windows
+from backend.themes.classify import classify_pending_notes
 from backend.x_client.sync import cascade_longer_windows, cascade_politician_windows
 
 
@@ -26,6 +27,17 @@ def main() -> int:
         "--with-x-sync",
         action="store_true",
         help="Exceptionnel: sync X 7d aujourd'hui (sinon timer hebdo)",
+    )
+    parser.add_argument(
+        "--skip-themes",
+        action="store_true",
+        help="Skip LLM theme classification",
+    )
+    parser.add_argument(
+        "--theme-limit",
+        type=int,
+        default=None,
+        help="Max notes to classify this run (default DESINFO_THEME_MAX_PER_RUN)",
     )
     parser.add_argument("--windows", nargs="*", default=None)
     args = parser.parse_args()
@@ -41,6 +53,12 @@ def main() -> int:
 
     roster = load_or_bootstrap(args.bootstrap)
     print("roster_size:", len(roster.get("media") or []))
+
+    if not args.skip_themes:
+        themes = classify_pending_notes(limit=args.theme_limit)
+        print("themes:", themes)
+    else:
+        print("themes: skipped")
 
     if args.with_x_sync and settings.x_api_configured:
         from backend.x_client.sync import sync_roster_post_counts

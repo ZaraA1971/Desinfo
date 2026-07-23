@@ -101,6 +101,10 @@ DESINFO_PUBLIC_URL=https://desinfo.electronlibre.info
 DESINFO_EXPORT_HMAC_SECRET=
 DESINFO_API_RATE_LIMIT_GET=120
 DESINFO_API_RATE_LIMIT_EXPORT=10
+OPENAI_API_KEY=          # thèmes radar
+OPENAI_MODEL=gpt-4o-mini
+DESINFO_THEME_BATCH_SIZE=20
+DESINFO_THEME_MAX_PER_RUN=800
 ```
 
 ## Harvest X (crédits)
@@ -110,6 +114,16 @@ DESINFO_API_RATE_LIMIT_EXPORT=10
 - Stocke les buckets jour dans `media_posts_daily` + fenêtre `7d`.
 - **Cascade** (0 crédit) : somme des jours → `30d` / `90d` / `365d` dès que couverture ≥ `DESINFO_CASCADE_COVERAGE` (défaut 0.7).
 - Ingest quotidien CN : pas de sync X (sauf `--with-x-sync`) ; cascade recalculée gratuitement.
+
+## Radar thématique (médias)
+
+- Axes : politique, santé, économie, justice, international, science, technologie, faits divers (+ `autre` hors radar).
+- Sens : **longueur ∝ nombre de CN du média** sur le thème (thème max = bord ; 0 reste à 25 % du rayon).
+- Classification : petit LLM (`OPENAI_API_KEY`, défaut `gpt-4o-mini`) en **fin d’ingest quotidien**, notes HELPFUL attribuées pas encore en `note_theme`.
+- Stockage durable : `note_theme(note_id, theme, model, scored_at)` — scores qui s’accumulent.
+- Snapshots médias : chaque item inclut `radar.axes[]` (`cn_count`, `weight`).
+- UI : clic ligne média → panneau radar. Script manuel : `scripts/classify_themes.py`.
+- Limites : `DESINFO_THEME_BATCH_SIZE` (20), `DESINFO_THEME_MAX_PER_RUN` (800) pour étaler le backlog.
 
 ## Export PDF (public)
 

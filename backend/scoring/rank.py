@@ -10,6 +10,7 @@ from typing import Any
 from backend.config import get_settings
 from backend.db import db_session, get_meta, set_meta
 from backend.media_config import load_media_roster
+from backend.themes.radar import build_radar_profiles
 
 log = logging.getLogger("desinfo.scoring")
 
@@ -104,6 +105,9 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
                     any_posts = True
 
         last_ingest = get_meta(conn, "last_ingest_at")
+        radar_by_media = build_radar_profiles(
+            conn, media_ids=roster_ids, window_key=window_key, now=now
+        )
 
     metric_mode = "post_cn" if any_posts else "cn_only"
 
@@ -134,6 +138,7 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
                 "post_count": posts,
                 "rate_cn_per_post": rate,
                 "ratio_post_per_cn": ratio_post_cn,
+                "radar": radar_by_media.get(mid),
             }
         )
 

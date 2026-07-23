@@ -1,5 +1,18 @@
 export type RankingKind = "media" | "politicians";
 
+export type RadarAxis = {
+  theme: string;
+  label: string;
+  cn_count: number;
+  weight?: number;
+};
+
+export type RadarProfile = {
+  axes: RadarAxis[];
+  direction?: string;
+  coverage?: number;
+};
+
 export type RankingItem = {
   media_id?: string;
   politician_id?: string;
@@ -13,6 +26,7 @@ export type RankingItem = {
   ratio_post_per_cn: number | null;
   rank: number;
   delta_rank: number | null;
+  radar?: RadarProfile | null;
 };
 
 export type MetricMode = "cn_only" | "post_cn";
