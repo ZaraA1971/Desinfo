@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { Suspense, useEffect, useState, useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ExportPanel } from "@/components/ExportPanel";
 import { RankingTable } from "@/components/RankingTable";
 import {
@@ -12,8 +13,16 @@ import {
   fetchRanking,
 } from "@/lib/api";
 
-export default function HomePage() {
-  const [kind, setKind] = useState<RankingKind>("media");
+function parseKind(raw: string | null): RankingKind {
+  return raw === "politicians" ? "politicians" : "media";
+}
+
+function HomePageInner() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const kind = parseKind(searchParams.get("kind"));
+
   const [windowKey, setWindowKey] = useState<string | null>(null);
   const [snap, setSnap] = useState<RankingSnapshot | null>(null);
   const [meta, setMeta] = useState<MetaResponse | null>(null);
@@ -47,8 +56,15 @@ export default function HomePage() {
   const onKindChange = (next: RankingKind) => {
     if (next === kind) return;
     setSnap(null);
-    setKind(next);
     setWindowKey(null);
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "media") {
+      params.delete("kind");
+    } else {
+      params.set("kind", next);
+    }
+    const q = params.toString();
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
   };
 
   const generated = snap?.generated_at
@@ -197,5 +213,20 @@ export default function HomePage() {
         </a>
       </footer>
     </main>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="shell">
+          <h1 className="brand">Observatoire de la désinformation</h1>
+          <p className="empty">Chargement…</p>
+        </main>
+      }
+    >
+      <HomePageInner />
+    </Suspense>
   );
 }

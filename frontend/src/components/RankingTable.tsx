@@ -133,6 +133,7 @@ export function RankingTable({
               activeKey={sortKey}
               dir={sortDir}
               onSort={onSort}
+              className="hide-sm"
             />
             <SortHeader
               label="Posts"
@@ -140,7 +141,6 @@ export function RankingTable({
               activeKey={sortKey}
               dir={sortDir}
               onSort={onSort}
-              className="hide-sm"
             />
             <SortHeader
               label="CN/Post"
@@ -180,8 +180,8 @@ export function RankingTable({
                     <span className="handle">@{item.x_handle}</span>
                   )}
                 </td>
-                <td className="num">{item.cn_count}</td>
-                <td className="num hide-sm">
+                <td className="num hide-sm">{item.cn_count}</td>
+                <td className="num">
                   {item.post_count == null ? "—" : item.post_count}
                 </td>
                 <td className="num">

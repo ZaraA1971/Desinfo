@@ -1,5 +1,5 @@
 # Candidats déclarés — présidentielle 2027
-# Source de référence : France 24 (mis à jour 2026-07-10, 22 déclarés).
+# Source de référence : France 24 + ajouts manuels.
 # Roster souverain : éditer ici ; pas de bootstrap auto.
 election: "2027"
 source: "https://www.france24.com/fr/france/20260524-france-presidentielle-2027-qui-sont-les-candidats-officiellement-declares"
@@ -95,6 +95,11 @@ candidates:
     party: Les Patriotes
     x_handle: f_philippot
     aliases: ["Florian Philippot", "@f_philippot"]
+  - id: matthieu_pigasse
+    name: Matthieu Pigasse
+    party: Indépendant
+    x_handle: MPigasse
+    aliases: ["Matthieu Pigasse", "Mathieu Pigasse", "@MPigasse"]
   - id: bruno_retailleau
     name: Bruno Retailleau
     party: Les Républicains
