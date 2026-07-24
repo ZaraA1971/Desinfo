@@ -21,6 +21,7 @@ from backend.export.pdf import build_ranking_pdf, validate_email
 from backend.media_config import load_media_roster
 from backend.politicians.config import load_politicians_roster
 from backend.scoring.rank import WINDOW_DAYS
+from backend.themes.classify import count_pending_themes
 from backend.windows.status import compute_windows_status
 
 log = logging.getLogger("desinfo.api")
@@ -218,17 +219,7 @@ def meta(request: Request) -> dict[str, Any]:
             theme_classified = int(
                 conn.execute("SELECT COUNT(*) AS n FROM note_theme").fetchone()["n"]
             )
-            theme_pending = int(
-                conn.execute(
-                    """
-                    SELECT COUNT(DISTINCT n.note_id) AS n
-                    FROM notes n
-                    JOIN note_media nm ON nm.note_id = n.note_id
-                    LEFT JOIN note_theme nt ON nt.note_id = n.note_id
-                    WHERE n.is_helpful=1 AND nt.note_id IS NULL
-                    """
-                ).fetchone()["n"]
-            )
+            theme_pending = count_pending_themes(window_key="7d")
     except Exception as e:
         log.warning("meta db read failed: %s", e)
         last_ingest = None

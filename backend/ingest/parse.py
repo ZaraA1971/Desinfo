@@ -38,10 +38,13 @@ def load_helpful_ids(paths: list[Path]) -> set[str]:
     return helpful
 
 
-def upsert_notes(conn: sqlite3.Connection, note_paths: list[Path], helpful_ids: set[str]) -> int:
-    """Insert/update HELPFUL notes only. Returns helpful notes upserted."""
+def upsert_notes(
+    conn: sqlite3.Connection, note_paths: list[Path], helpful_ids: set[str]
+) -> tuple[int, set[str]]:
+    """Insert/update HELPFUL notes only. Returns (count, note_ids touched)."""
     count = 0
     scanned = 0
+    touched: set[str] = set()
     batch: list[tuple] = []
 
     def flush() -> None:
@@ -83,11 +86,12 @@ def upsert_notes(conn: sqlite3.Connection, note_paths: list[Path], helpful_ids: 
                 summary = row.get("summary") or ""
                 classification = row.get("classification") or ""
                 batch.append((note_id, tweet_id, created, summary, classification, HELPFUL))
+                touched.add(note_id)
                 count += 1
                 if len(batch) >= 2000:
                     flush()
     flush()
     set_meta(conn, "notes_scanned", str(scanned))
     set_meta(conn, "notes_helpful", str(count))
-    log.info("upserted %s helpful notes (scanned %s)", count, scanned)
-    return count
+    log.info("upserted %s helpful notes (scanned %s, touched %s)", count, scanned, len(touched))
+    return count, touched

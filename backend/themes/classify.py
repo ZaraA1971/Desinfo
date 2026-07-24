@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.config import get_settings
 from backend.db import db_session, set_meta
+from backend.scoring.rank import WINDOW_DAYS, _ms_since
 from backend.themes.openai_chat import post_chat_completion
 from backend.themes.taxonomy import ALL_THEMES, RADAR_THEMES, normalize_theme
 
@@ -68,33 +69,72 @@ def _clip(text: str | None, limit: int = 500) -> str:
     return s
 
 
-def pending_attributed_notes(limit: int, *, force: bool = False) -> list[dict[str, str]]:
-    """HELPFUL notes linked to at least one media (+ tweet_id for post context)."""
+def _attributed_clause() -> str:
+    return """
+        (
+          EXISTS (SELECT 1 FROM note_media nm WHERE nm.note_id = n.note_id)
+          OR EXISTS (SELECT 1 FROM note_politician np WHERE np.note_id = n.note_id)
+        )
+    """
+
+
+def _classify_window_key(window_key: str | None) -> str:
+    key = (window_key or "7d").strip().lower()
+    if key != "7d":
+        raise ValueError("theme classification supports window 7d only (longer windows use stored themes)")
+    return key
+
+
+def pending_attributed_notes(
+    limit: int,
+    *,
+    force: bool = False,
+    window_key: str = "7d",
+    note_ids: set[str] | None = None,
+    now: datetime | None = None,
+) -> list[dict[str, str]]:
+    """HELPFUL notes in the classify window (7d) linked to media or politician."""
+    window_key = _classify_window_key(window_key)
+    since_ms = _ms_since(WINDOW_DAYS[window_key], now)
+    attributed = _attributed_clause()
+    id_filter = ""
+    id_params: list[Any] = []
+    if note_ids is not None:
+        if not note_ids:
+            return []
+        placeholders = ",".join("?" * len(note_ids))
+        id_filter = f" AND n.note_id IN ({placeholders})"
+        id_params = list(note_ids)
     with db_session() as conn:
         if force:
             rows = conn.execute(
-                """
+                f"""
                 SELECT DISTINCT n.note_id, n.summary, n.tweet_id
                 FROM notes n
-                JOIN note_media nm ON nm.note_id = n.note_id
                 WHERE n.is_helpful = 1
+                  AND n.created_at_ms >= ?
+                  AND {attributed}
+                  {id_filter}
                 ORDER BY n.created_at_ms DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (since_ms, *id_params, limit),
             ).fetchall()
         else:
             rows = conn.execute(
-                """
+                f"""
                 SELECT DISTINCT n.note_id, n.summary, n.tweet_id
                 FROM notes n
-                JOIN note_media nm ON nm.note_id = n.note_id
                 LEFT JOIN note_theme nt ON nt.note_id = n.note_id
-                WHERE n.is_helpful = 1 AND nt.note_id IS NULL
+                WHERE n.is_helpful = 1
+                  AND n.created_at_ms >= ?
+                  AND nt.note_id IS NULL
+                  AND {attributed}
+                  {id_filter}
                 ORDER BY n.created_at_ms DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (since_ms, *id_params, limit),
             ).fetchall()
     out: list[dict[str, str]] = []
     for r in rows:
@@ -106,6 +146,27 @@ def pending_attributed_notes(limit: int, *, force: bool = False) -> list[dict[st
             }
         )
     return out
+
+
+def count_pending_themes(*, window_key: str = "7d", now: datetime | None = None) -> int:
+    """Unclassified attributed notes in the classify window (default 7d)."""
+    window_key = _classify_window_key(window_key)
+    since_ms = _ms_since(WINDOW_DAYS[window_key], now)
+    with db_session() as conn:
+        return int(
+            conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT n.note_id) AS n
+                FROM notes n
+                LEFT JOIN note_theme nt ON nt.note_id = n.note_id
+                WHERE n.is_helpful = 1
+                  AND n.created_at_ms >= ?
+                  AND nt.note_id IS NULL
+                  AND {_attributed_clause()}
+                """,
+                (since_ms,),
+            ).fetchone()["n"]
+        )
 
 
 def _classify_batch(batch: list[dict[str, str]], settings) -> dict[str, str]:
@@ -180,8 +241,10 @@ def classify_pending_notes(
     limit: int | None = None,
     batch_size: int | None = None,
     force: bool = False,
+    window_key: str = "7d",
+    note_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Classify up to `limit` attributed notes. Idempotent storage (upsert)."""
+    """Classify attributed notes in the current 7d window only (weekly moisson)."""
     settings = get_settings()
     if not settings.openai_configured:
         return {
@@ -191,19 +254,24 @@ def classify_pending_notes(
             "pending_left": None,
         }
 
+    window_key = _classify_window_key(window_key)
     limit = limit if limit is not None else settings.theme_max_per_run
     batch_size = batch_size if batch_size is not None else settings.theme_batch_size
     batch_size = max(1, min(batch_size, 40))
 
-    pending = pending_attributed_notes(limit, force=force)
+    pending = pending_attributed_notes(
+        limit, force=force, window_key=window_key, note_ids=note_ids
+    )
     if not pending:
         return {
             "status": "ok",
             "classified": 0,
             "batches": 0,
             "model": settings.openai_model,
-            "pending_left": 0,
+            "pending_left": count_pending_themes(window_key=window_key),
+            "window": window_key,
             "force": force,
+            "incremental_note_ids": note_ids is not None,
         }
 
     # Prefetch tweet texts once per run (fetch mode) — fewer round-trips
@@ -230,17 +298,10 @@ def classify_pending_notes(
             continue
 
     with db_session() as conn:
-        left = conn.execute(
-            """
-            SELECT COUNT(DISTINCT n.note_id) AS n
-            FROM notes n
-            JOIN note_media nm ON nm.note_id = n.note_id
-            LEFT JOIN note_theme nt ON nt.note_id = n.note_id
-            WHERE n.is_helpful = 1 AND nt.note_id IS NULL
-            """
-        ).fetchone()["n"]
+        left = count_pending_themes(window_key=window_key)
         set_meta(conn, "last_theme_classify_at", datetime.now(timezone.utc).isoformat())
         set_meta(conn, "last_theme_classify_status", "ok" if not errors else "partial")
+        set_meta(conn, "last_theme_classify_window", window_key)
 
     return {
         "status": "ok" if not errors else "partial",
@@ -248,7 +309,9 @@ def classify_pending_notes(
         "batches": batches,
         "model": settings.openai_model,
         "pending_left": int(left),
+        "window": window_key,
         "force": force,
+        "incremental_note_ids": note_ids is not None,
         "errors": errors[:10],
         "radar_themes": list(RADAR_THEMES),
     }

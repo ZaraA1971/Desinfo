@@ -208,7 +208,7 @@ function HomePageInner() {
           items={snap.items}
           metricMode={snap.metric_mode}
           entityLabel={kind === "politicians" ? "Candidat" : "Média"}
-          showRadar={kind === "media"}
+          showRadar
         />
       )}
       {!error && !snap && !pending && (
@@ -237,10 +237,11 @@ function HomePageInner() {
           restent grisées jusqu’à couverture suffisante (~70 % du roster).
         </p>
         <p>
-          Profil thématique (médias) : radar à 8 axes (politique, santé,
-          économie, justice, international, science, technologie, faits
-          divers). Longueur des branches proportionnelle au nombre de CN du
-          média sur chaque thème. Classification LLM en fin de moisson hebdomadaire.
+          Profil thématique (médias et candidats) : radar à 8 axes (politique,
+          santé, économie, justice, international, science, technologie, faits
+          divers) + compteur discret « (hors radar) ». Longueur des branches
+          proportionnelle au nombre de CN sur chaque thème. Classification LLM
+          en fin de moisson hebdomadaire.
         </p>
         {meta && (
           <p>

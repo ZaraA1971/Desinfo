@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Classify attributed notes into themes (LLM) then refresh media snapshots."""
+"""Classify attributed notes into themes (LLM) then refresh snapshots."""
 from __future__ import annotations
 
 import argparse
@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from backend.config import get_settings
 from backend.db import init_db
+from backend.politicians.rank import score_all_politicians_windows
 from backend.scoring.rank import score_all_windows
 from backend.themes.classify import classify_pending_notes
 
@@ -28,7 +29,12 @@ def main() -> int:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Reclassify already-tagged notes (prompt upgrade)",
+        help="Reclassify 7d notes already tagged (prompt upgrade)",
+    )
+    parser.add_argument(
+        "--window",
+        default="7d",
+        help="Classification window (7d only — longer windows use stored themes)",
     )
     parser.add_argument("--skip-score", action="store_true")
     args = parser.parse_args()
@@ -40,12 +46,17 @@ def main() -> int:
     )
     init_db()
     res = classify_pending_notes(
-        limit=args.limit, batch_size=args.batch_size, force=args.force
+        limit=args.limit,
+        batch_size=args.batch_size,
+        force=args.force,
+        window_key=args.window,
     )
     print("themes:", res)
     if not args.skip_score:
         paths = score_all_windows()
         print("snapshots:", [str(p) for p in paths])
+        politician_paths = score_all_politicians_windows()
+        print("politicians_snapshots:", [str(p) for p in politician_paths])
     return 0 if res.get("status") in ("ok", "partial", "skipped") else 1
 
 

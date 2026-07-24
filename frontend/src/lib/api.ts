@@ -11,6 +11,12 @@ export type RadarProfile = {
   axes: RadarAxis[];
   direction?: string;
   coverage?: number;
+  /** CN tagged « autre » — shown in chips, excluded from radar polygon */
+  autre_count?: number;
+  /** CN in window, not yet classified by LLM */
+  unclassified_count?: number;
+  /** Total attributed CN in window (matches ranking cn_count) */
+  attributed_count?: number;
 };
 
 export type RankingItem = {

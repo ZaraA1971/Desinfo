@@ -41,6 +41,11 @@ def main() -> int:
         help="Skip CN ingest, themes and X API; recompute cascade + score only",
     )
     parser.add_argument("--skip-download", action="store_true", help="CN ingest from existing TSV")
+    parser.add_argument(
+        "--full-ingest",
+        action="store_true",
+        help="Re-ingest latest dump + full re-attribute (exceptionnel)",
+    )
     parser.add_argument("--bootstrap", action="store_true", help="Rebuild media_roster.yml")
     parser.add_argument("--skip-themes", action="store_true", help="Skip LLM theme classification")
     parser.add_argument(
@@ -67,14 +72,17 @@ def main() -> int:
     init_db()
 
     if not args.cascade_only:
-        result = run_ingest(skip_download=args.skip_download)
+        result = run_ingest(skip_download=args.skip_download, full=args.full_ingest)
         print("ingest:", result)
 
         roster = load_or_bootstrap(args.bootstrap)
         print("roster_size:", len(roster.get("media") or []))
 
         if not args.skip_themes:
-            themes = classify_pending_notes(limit=args.theme_limit)
+            touched: set[str] | None = None
+            if result.get("status") == "ok" and result.get("touched_note_ids"):
+                touched = set(result["touched_note_ids"])
+            themes = classify_pending_notes(limit=args.theme_limit, note_ids=touched)
             print("themes:", themes)
         else:
             print("themes: skipped")

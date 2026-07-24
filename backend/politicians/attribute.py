@@ -48,16 +48,36 @@ def _match_terms(candidate: dict[str, Any]) -> list[str]:
     return terms
 
 
-def attribute_politicians(conn: sqlite3.Connection) -> int:
-    """Sync politicians table from roster, then re-attribute all HELPFUL notes.
-
-    Returns the number of note<->politician links created.
+def attribute_politicians(
+    conn: sqlite3.Connection,
+    *,
+    note_ids: set[str] | None = None,
+    rebuild: bool = False,
+) -> int:
+    """
+    Attribute notes to politicians. Incremental by default (note_ids from latest dump).
+    rebuild=True only when roster config changes (full re-link).
     """
     roster = load_politicians_roster()
     candidates = roster.get("candidates") or []
     sync_politicians_table(conn, candidates)
 
-    conn.execute("DELETE FROM note_politician")
+    if rebuild:
+        conn.execute("DELETE FROM note_politician")
+        log.info("politician attribution rebuild")
+    elif note_ids:
+        if not note_ids:
+            log.info("politician attribution incremental — 0 notes")
+            return 0
+        placeholders = ",".join("?" * len(note_ids))
+        conn.execute(
+            f"DELETE FROM note_politician WHERE note_id IN ({placeholders})",
+            list(note_ids),
+        )
+        log.info("politician attribution incremental — %s notes", len(note_ids))
+    else:
+        log.info("politician attribution backfill unlinked")
+
     if not candidates:
         log.warning("empty politicians roster — no attribution performed")
         return 0
@@ -66,9 +86,29 @@ def attribute_politicians(conn: sqlite3.Connection) -> int:
         (c["id"], _match_terms(c)) for c in candidates if c.get("id")
     ]
 
-    rows = conn.execute(
-        "SELECT note_id, summary FROM notes WHERE is_helpful=1"
-    ).fetchall()
+    if rebuild:
+        rows = conn.execute(
+            "SELECT note_id, summary FROM notes WHERE is_helpful=1"
+        ).fetchall()
+    elif note_ids:
+        placeholders = ",".join("?" * len(note_ids))
+        rows = conn.execute(
+            f"""
+            SELECT note_id, summary FROM notes
+            WHERE is_helpful=1 AND note_id IN ({placeholders})
+            """,
+            list(note_ids),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT n.note_id, n.summary FROM notes n
+            WHERE n.is_helpful=1
+              AND NOT EXISTS (
+                SELECT 1 FROM note_politician np WHERE np.note_id = n.note_id
+              )
+            """
+        ).fetchall()
 
     links = 0
     batch: list[tuple] = []

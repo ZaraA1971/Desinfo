@@ -97,6 +97,8 @@ def sync_all_post_counts(windows: list[str] | None = None) -> dict[str, Any]:
     errors: list[str] = []
     status = "ok"
     days_written = 0
+    api_calls = 0
+    skipped_handles = 0
     min_age = max(0, settings.x_sync_min_age_hours)
 
     with db_session() as conn:
@@ -129,6 +131,7 @@ def sync_all_post_counts(windows: list[str] | None = None) -> dict[str, Any]:
                 if handle in already:
                     n = already[handle]
                     synced[w][handle] = n
+                    skipped_handles += 1
                     log.info("skip @%s (synced <%sh ago, count=%s)", handle, min_age, n)
                     continue
                 try:
@@ -157,6 +160,7 @@ def sync_all_post_counts(windows: list[str] | None = None) -> dict[str, Any]:
                         )
                     days_written += len(buckets) * (len(media_ids) + len(politician_ids))
                     synced[w][handle] = total
+                    api_calls += 1
                     log.info(
                         "@%s → %s posts (counts/recent, %s days, media=%s pol=%s)",
                         handle,
@@ -197,6 +201,7 @@ def sync_all_post_counts(windows: list[str] | None = None) -> dict[str, Any]:
                                     when=until,
                                 )
                             synced[w][handle] = total
+                            api_calls += 1
                         except XApiError as e2:
                             errors.append(f"{w}/@{handle}: {e2.status} {e2.detail}")
                             if e2.status == 402:
@@ -219,13 +224,13 @@ def sync_all_post_counts(windows: list[str] | None = None) -> dict[str, Any]:
         set_meta(conn, "last_x_sync_politicians_status", status)
 
     sample = synced.get("7d") or synced.get(api_windows[0]) or {}
-    api_calls = sum(len(synced[w]) for w in api_windows)
     result = {
         "status": status,
         "synced_at": stamp,
         "windows": api_windows,
         "unique_handles": len(handle_targets),
         "api_calls": api_calls,
+        "skipped_handles": skipped_handles,
         "synced_handles": {w: len(synced[w]) for w in api_windows},
         "days_written": days_written,
         "sample": {h: sample[h] for h in list(sample)[:8]},

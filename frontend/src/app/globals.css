@@ -472,6 +472,23 @@ footer {
   font-variant-numeric: tabular-nums;
 }
 
+.radar-centile-hors-radar {
+  opacity: 0.55;
+  min-width: 2.8rem;
+}
+
+.radar-centile-hors-radar .radar-centile-label {
+  font-size: 0.62rem;
+  text-transform: none;
+  letter-spacing: 0;
+  font-style: italic;
+}
+
+.radar-centile-hors-radar .radar-centile-val {
+  font-weight: 500;
+  color: var(--muted);
+}
+
 .radar-chart-wrap {
   display: flex;
   flex-direction: column;

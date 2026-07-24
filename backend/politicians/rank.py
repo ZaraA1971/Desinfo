@@ -17,6 +17,7 @@ from backend.config import get_settings
 from backend.db import db_session, get_meta, set_meta
 from backend.politicians.config import load_politicians_roster
 from backend.scoring.rank import WINDOW_DAYS, _ms_since, parse_window
+from backend.themes.radar import build_politician_radar_profiles
 
 log = logging.getLogger("desinfo.politicians.scoring")
 
@@ -95,6 +96,9 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
                     any_posts = True
 
         last_ingest = get_meta(conn, "last_ingest_at")
+        radar_by_politician = build_politician_radar_profiles(
+            conn, politician_ids=roster_ids, window_key=window_key, now=now
+        )
 
     metric_mode = "post_cn" if any_posts else "cn_only"
 
@@ -125,6 +129,7 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
                 "post_count": posts,
                 "rate_cn_per_post": rate,
                 "ratio_post_per_cn": ratio_post_cn,
+                "radar": radar_by_politician.get(pid),
             }
         )
 

@@ -21,7 +21,7 @@ function labelAnchor(angleRad: number): "start" | "middle" | "end" {
   return "middle";
 }
 
-/** Branch length ∝ CN count within this media (max theme = outer ring). */
+/** Branch length ∝ CN count within this entity (max theme = outer ring). */
 function axisWeight(cn: number, maxCn: number): number {
   if (maxCn <= 0 || cn <= 0) return 0;
   return cn / maxCn;
@@ -38,6 +38,11 @@ export function ThemeRadar({ name, radar }: Props) {
   const labelR = maxR + 36;
   const levels = [0.25, 0.5, 0.75, 1];
   const maxCn = Math.max(0, ...axes.map((a) => a.cn_count));
+  const radarCn = axes.reduce((s, a) => s + a.cn_count, 0);
+  const autreCount = radar.autre_count ?? 0;
+  const unclassifiedCount = radar.unclassified_count ?? 0;
+  const attributedCount =
+    radar.attributed_count ?? radarCn + autreCount + unclassifiedCount;
 
   if (n < 3) {
     return (
@@ -92,6 +97,16 @@ export function ThemeRadar({ name, radar }: Props) {
             <span className="radar-centile-val">{ax.cn_count}</span>
           </span>
         ))}
+        <span className="radar-centile radar-centile-hors-radar">
+          <span className="radar-centile-label">(hors radar)</span>
+          <span className="radar-centile-val">{autreCount}</span>
+        </span>
+        {unclassifiedCount > 0 && (
+          <span className="radar-centile radar-centile-hors-radar">
+            <span className="radar-centile-label">(non classifié)</span>
+            <span className="radar-centile-val">{unclassifiedCount}</span>
+          </span>
+        )}
       </div>
       <div className="radar-chart-wrap">
         <svg
@@ -133,8 +148,11 @@ export function ThemeRadar({ name, radar }: Props) {
         <p className="radar-caption">
           Longueur ∝ nombre de CN du média sur le thème (le max atteint le bord ;
           0 reste à 25&nbsp;% du rayon)
-          {radar.coverage != null
-            ? ` · couverture classée ${(radar.coverage * 100).toFixed(0)} %`
+          {attributedCount > 0
+            ? ` · ${attributedCount} CN sur la période`
+            : ""}
+          {radar.coverage != null && attributedCount > 0
+            ? ` · ${(radar.coverage * 100).toFixed(0)} % classées`
             : ""}
         </p>
       </div>

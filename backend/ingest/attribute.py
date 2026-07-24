@@ -62,17 +62,56 @@ def sync_media_table(conn: sqlite3.Connection, media_list: list[dict[str, Any]])
         )
 
 
-def attribute_notes(conn: sqlite3.Connection) -> int:
+def attribute_notes(
+    conn: sqlite3.Connection,
+    *,
+    note_ids: set[str] | None = None,
+    rebuild: bool = False,
+) -> int:
+    """
+    Attribute notes to media. Incremental by default (note_ids from latest dump).
+    rebuild=True only when roster config changes (full re-link).
+    """
     media_list = load_media_domains()
     sync_media_table(conn, media_list)
     index = build_domain_index(media_list)
     if not index:
         raise RuntimeError("Empty media domain index — check config/media_domains.yml")
 
-    conn.execute("DELETE FROM note_media")
-    rows = conn.execute(
-        "SELECT note_id, summary FROM notes WHERE is_helpful=1"
-    ).fetchall()
+    if rebuild:
+        conn.execute("DELETE FROM note_media")
+        rows = conn.execute(
+            "SELECT note_id, summary FROM notes WHERE is_helpful=1"
+        ).fetchall()
+        log.info("media attribution rebuild — %s helpful notes", len(rows))
+    elif note_ids:
+        if not note_ids:
+            log.info("media attribution incremental — 0 notes")
+            return 0
+        placeholders = ",".join("?" * len(note_ids))
+        conn.execute(
+            f"DELETE FROM note_media WHERE note_id IN ({placeholders})",
+            list(note_ids),
+        )
+        rows = conn.execute(
+            f"""
+            SELECT note_id, summary FROM notes
+            WHERE is_helpful=1 AND note_id IN ({placeholders})
+            """,
+            list(note_ids),
+        ).fetchall()
+        log.info("media attribution incremental — %s notes", len(rows))
+    else:
+        rows = conn.execute(
+            """
+            SELECT n.note_id, n.summary FROM notes n
+            WHERE n.is_helpful=1
+              AND NOT EXISTS (
+                SELECT 1 FROM note_media nm WHERE nm.note_id = n.note_id
+              )
+            """
+        ).fetchall()
+        log.info("media attribution backfill unlinked — %s notes", len(rows))
 
     links = 0
     batch: list[tuple] = []

@@ -55,7 +55,10 @@ def main() -> int:
     print("roster_size:", len(roster.get("media") or []))
 
     if not args.skip_themes:
-        themes = classify_pending_notes(limit=args.theme_limit)
+        touched: set[str] | None = None
+        if result.get("status") == "ok" and result.get("touched_note_ids"):
+            touched = set(result["touched_note_ids"])
+        themes = classify_pending_notes(limit=args.theme_limit, note_ids=touched)
         print("themes:", themes)
     else:
         print("themes: skipped")

@@ -137,15 +137,15 @@ Variables :
 - UI : fenêtres 30/90/365 **grisées et non cliquables** tant que `windows_status[w].available` est false (`/api/meta`).
 - CN : fenêtres glissantes recalculées au score depuis SQLite — pas d’ingest quotidien.
 
-## Radar thématique (médias)
+## Radar thématique (médias + candidats)
 
 - Axes : politique, santé, économie, justice, international, science, technologie, faits divers (+ `autre` hors radar).
-- Sens : **longueur ∝ nombre de CN du média** sur le thème (thème max = bord ; 0 reste à 25 % du rayon).
-- Classification : LLM famille GPT-5 (`OPENAI_MODEL=gpt-5.4-mini`) en **fin de moisson hebdo**.
-  Contexte = **post (tweet)** + **note CN** si cache local ; sinon note seule (`DESINFO_THEME_X_FETCH=cache_only`).
-- Stockage durable : `note_theme(note_id, theme, model, scored_at)` — scores qui s’accumulent.
-- Snapshots médias : chaque item inclut `radar.axes[]` (`cn_count`, `weight`).
-- UI : clic ligne média → panneau radar. Script manuel : `scripts/classify_themes.py`.
+- Sens : **longueur ∝ nombre de CN** sur le thème (max = bord ; 0 reste à 25 % du rayon).
+- Classification : LLM en fin de moisson hebdo — **fenêtre 7j courante seulement** (notes média ou candidat sans thème).
+  Les fenêtres 30/90/365 réutilisent les thèmes déjà stockés (`note_theme`) + la base CN accumulée à chaque ingest hebdo — pas de re-classification LLM.
+- Agrégation : `build_radar_profiles` (médias), `build_politician_radar_profiles` (candidats).
+- Snapshots : chaque item inclut `radar.axes[]` (`cn_count`, `weight`).
+- UI : clic ligne → panneau radar (médias et candidats). Script manuel : `scripts/classify_themes.py`.
 - Limites : `DESINFO_THEME_BATCH_SIZE` (20), `DESINFO_THEME_MAX_PER_RUN` (800) pour étaler le backlog.
 
 ## Export PDF (public)
@@ -199,7 +199,7 @@ pipelines d'attribution indépendants (aucun ne touche les tables de l'autre) :
 | `backend/ingest/attribute.py` (domaines URL → média) | `backend/politicians/attribute.py` (`@handle` ou alias nom, insensible à la casse, dans le texte de la note → politicien) |
 | `media`, `note_media` | `politicians`, `note_politician` (mêmes clés/logique, `matched_alias` au lieu de `matched_domain`) |
 | `media_posts_daily`, `media_post_windows` | `politician_posts_daily`, `politician_post_windows` |
-| `backend/scoring/rank.py` (`compute_ranking`/`write_snapshot`/`score_all_windows`) | `backend/politicians/rank.py` (mêmes fonctions, `score_all_politicians_windows`) — réutilise `WINDOW_DAYS` |
+| `backend/scoring/rank.py` + radar médias | `backend/politicians/rank.py` + `build_politician_radar_profiles` |
 | `data/snapshots/latest_{window}.json` | `data/snapshots/latest_politicians_{window}.json` (+ `"kind": "politicians"`) |
 
 - `backend/ingest/pipeline.py` : `attribute_politicians(conn)` appelé juste après `attribute_notes(conn)` (même transaction) ; résultat inclut `note_politician_links`.
@@ -210,6 +210,11 @@ pipelines d'attribution indépendants (aucun ne touche les tables de l'autre) :
 
 ## Ingest CN (détails)
 
+- **Incrémental** : seuls les dumps **postérieurs** à `last_dump_date` (meta) sont téléchargés/parsés ; skip si déjà à jour. Legacy : `last_dump_date` initialisé depuis `dump_date` au 1er run.
+- 1ère moisson : dernier dump disponible ; ensuite +1 dump/jour max par semaine (rattrapage si retard).
+- Attribution médias/candidats : **notes touchées uniquement** (rebuild complet si hash roster change).
+- Thèmes LLM : **7j courants**, notes sans `note_theme` ; après ingest, filtre sur `touched_note_ids` quand disponible.
+- Moisson X : **1 req/@handle/semaine** (`counts/recent`) ; skip si `synced_at` récent ; 30/90/365 = cascade `*_posts_daily` (zéro API).
 - URL : `https://ton.twimg.com/birdwatch-public-data/YYYY/MM/DD/{notes|noteStatusHistory}/*.zip`
 - Pipeline disque : status → set HELPFUL → delete ; chaque shard notes → upsert HELPFUL only → delete.
 - Ne jamais stocker toutes les notes non-HELPFUL en SQLite.
