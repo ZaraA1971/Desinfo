@@ -21,6 +21,7 @@ from backend.export.pdf import build_ranking_pdf, validate_email
 from backend.media_config import load_media_roster
 from backend.politicians.config import load_politicians_roster
 from backend.scoring.rank import WINDOW_DAYS
+from backend.windows.status import compute_windows_status
 
 log = logging.getLogger("desinfo.api")
 
@@ -197,8 +198,18 @@ def meta(request: Request) -> dict[str, Any]:
     last_theme = None
     theme_classified = 0
     theme_pending = 0
-    windows_ready: dict[str, str] = {}
-    politicians_windows_ready: dict[str, str] = {}
+    windows_status = compute_windows_status(kind="media")
+    politicians_windows_status = compute_windows_status(kind="politicians")
+    windows_ready = {
+        w: (s.get("metric_mode") or "cn_only")
+        for w, s in windows_status.items()
+        if s.get("available")
+    }
+    politicians_windows_ready = {
+        w: (s.get("metric_mode") or "cn_only")
+        for w, s in politicians_windows_status.items()
+        if s.get("available")
+    }
 
     try:
         with db_session() as conn:
@@ -218,43 +229,12 @@ def meta(request: Request) -> dict[str, Any]:
                     """
                 ).fetchone()["n"]
             )
-            rows = conn.execute(
-                """
-                SELECT window_key, COUNT(*) AS n
-                FROM media_post_windows
-                WHERE post_count > 0
-                GROUP BY window_key
-                """
-            ).fetchall()
-            posts_by_window = {r["window_key"]: int(r["n"]) for r in rows}
-            prows = conn.execute(
-                """
-                SELECT window_key, COUNT(*) AS n
-                FROM politician_post_windows
-                WHERE post_count > 0
-                GROUP BY window_key
-                """
-            ).fetchall()
-            pol_posts = {r["window_key"]: int(r["n"]) for r in prows}
     except Exception as e:
         log.warning("meta db read failed: %s", e)
-        posts_by_window = {}
-        pol_posts = {}
-
-    for w in WINDOW_DAYS:
-        mode = "cn_only"
-        try:
-            mode = _load_snapshot(w, "media").get("metric_mode", "cn_only")
-        except HTTPException:
-            pass
-        windows_ready[w] = mode if posts_by_window.get(w, 0) > 0 else "cn_only"
-
-        pmode = "cn_only"
-        try:
-            pmode = _load_snapshot(w, "politicians").get("metric_mode", "cn_only")
-        except HTTPException:
-            pass
-        politicians_windows_ready[w] = pmode if pol_posts.get(w, 0) > 0 else "cn_only"
+        last_ingest = None
+        last_theme = None
+        theme_classified = 0
+        theme_pending = 0
 
     default_snap = None
     try:
@@ -267,6 +247,8 @@ def meta(request: Request) -> dict[str, Any]:
         "windows": list(WINDOW_DAYS.keys()),
         "windows_ready": windows_ready,
         "politicians_windows_ready": politicians_windows_ready,
+        "windows_status": windows_status,
+        "politicians_windows_status": politicians_windows_status,
         "x_sync_windows": settings.x_sync_windows,
         "next_x_sync_at": _next_x_sync_at(),
         "roster_size": len(roster.get("media") or []),
@@ -290,7 +272,16 @@ def ranking(
     kind: str | None = Query(default="media"),
 ) -> dict[str, Any]:
     _check_rate(request, kind="get")
-    return _load_snapshot(_resolve_window(window), _resolve_kind(kind))
+    resolved_kind = _resolve_kind(kind)
+    resolved_window = _resolve_window(window)
+    status = compute_windows_status(kind=resolved_kind)
+    wstat = status.get(resolved_window) or {}
+    if resolved_window != "7d" and not wstat.get("available"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Fenêtre {resolved_window} pas encore disponible (cascade en cours)",
+        )
+    return _load_snapshot(resolved_window, resolved_kind)
 
 
 @app.post("/api/export")
@@ -303,6 +294,12 @@ def export_pdf(body: ExportRequest, request: Request) -> Response:
 
     window = _resolve_window(body.window)
     kind = _resolve_kind(body.kind)
+    wstat = compute_windows_status(kind=kind).get(window) or {}
+    if window != "7d" and not wstat.get("available"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Export indisponible pour {window} (cascade en cours)",
+        )
 
     try:
         email = validate_email(body.email)

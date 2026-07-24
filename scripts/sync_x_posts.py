@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manual X sync helper — prefer weekly timer / sync_x_weekly.py."""
+"""Manual X sync helper — prefer weekly timer / run_weekly.py."""
 from __future__ import annotations
 
 import argparse
@@ -20,7 +20,7 @@ from backend.x_client.sync import cascade_longer_windows, sync_roster_post_count
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Sync X 7d counts (+ cascade). Prefer scripts/sync_x_weekly.py"
+        description="Sync X 7d counts (+ cascade). Prefer scripts/run_weekly.py"
     )
     parser.add_argument("--windows", nargs="*", default=None, help="Défaut: 7d only")
     parser.add_argument(

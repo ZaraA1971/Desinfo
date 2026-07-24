@@ -14,17 +14,19 @@ fi
 install -m 644 "$SCRIPT_DIR/desinfo-api.service" "$UNIT_DIR/"
 install -m 644 "$SCRIPT_DIR/desinfo-frontend.service" "$UNIT_DIR/"
 install -m 644 "$SCRIPT_DIR/desinfo-ingest.service" "$UNIT_DIR/"
-install -m 644 "$SCRIPT_DIR/desinfo-ingest.timer" "$UNIT_DIR/"
 install -m 644 "$SCRIPT_DIR/desinfo-x-sync.service" "$UNIT_DIR/"
 install -m 644 "$SCRIPT_DIR/desinfo-x-sync.timer" "$UNIT_DIR/"
 
 systemctl daemon-reload
-systemctl enable desinfo-api.service desinfo-frontend.service desinfo-ingest.timer desinfo-x-sync.timer
+systemctl enable desinfo-api.service desinfo-frontend.service desinfo-x-sync.timer
 systemctl restart desinfo-api.service
 # frontend may not be built yet
 systemctl restart desinfo-frontend.service || true
-systemctl enable --now desinfo-ingest.timer
+
+# Daily ingest timer retired — weekly pipeline only
+systemctl disable --now desinfo-ingest.timer 2>/dev/null || true
+
 systemctl enable --now desinfo-x-sync.timer
 
 echo "OK — units installed (ROOT=$ROOT)"
-systemctl --no-pager status desinfo-api.service desinfo-ingest.timer desinfo-x-sync.timer || true
+systemctl --no-pager status desinfo-api.service desinfo-x-sync.timer || true

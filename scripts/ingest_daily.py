@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily CN ingest + theme classify + score (+ emails CSV). X sync is weekly."""
+"""Manual CN ingest helper — production uses scripts/run_weekly.py (timer hebdo)."""
 from __future__ import annotations
 
 import argparse
@@ -26,7 +26,7 @@ def main() -> int:
     parser.add_argument(
         "--with-x-sync",
         action="store_true",
-        help="Exceptionnel: sync X 7d aujourd'hui (sinon timer hebdo)",
+        help="Also run X 7d harvest before cascade (prefer run_weekly.py)",
     )
     parser.add_argument(
         "--skip-themes",

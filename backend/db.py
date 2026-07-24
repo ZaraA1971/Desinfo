@@ -50,6 +50,14 @@ CREATE TABLE IF NOT EXISTS note_theme (
 
 CREATE INDEX IF NOT EXISTS idx_note_theme_theme ON note_theme(theme);
 
+CREATE TABLE IF NOT EXISTS tweets (
+    tweet_id TEXT PRIMARY KEY,
+    text TEXT,
+    lang TEXT,
+    fetched_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ok'
+);
+
 CREATE TABLE IF NOT EXISTS media_posts_daily (
     media_id TEXT NOT NULL,
     day TEXT NOT NULL,

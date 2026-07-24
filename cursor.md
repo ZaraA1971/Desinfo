@@ -57,8 +57,7 @@ download CN dump → parse notes + status → filter HELPFUL
 |---------|------|------|
 | FastAPI | `127.0.0.1:8700` | `desinfo-api` |
 | Next.js | `127.0.0.1:8710` | `desinfo-frontend` |
-| Ingest quotidien | oneshot 05:00 UTC | `desinfo-ingest.timer` |
-| X harvest hebdo | oneshot Mon 06:00 UTC | `desinfo-x-sync.timer` |
+| Moisson hebdo | oneshot Mon 06:00 UTC | `desinfo-x-sync.timer` → `run_weekly.py` |
 
 ## Relance services
 
@@ -66,14 +65,16 @@ download CN dump → parse notes + status → filter HELPFUL
 sudo systemctl restart desinfo-api desinfo-frontend
 # Après build frontend :
 cd /srv/desinfo/frontend && npm run build && sudo systemctl restart desinfo-frontend
-# Ingest manuel :
+# Moisson manuelle (CN seul, sans X) :
 sudo systemctl start desinfo-ingest.service
+# Pipeline complet (CN + X + score) :
+sudo systemctl start desinfo-x-sync.service
 ```
 
 | Changement | Action |
 |------------|--------|
 | `backend/api/` | `systemctl restart desinfo-api` |
-| `backend/ingest/` / `scoring/` | prochain timer ou `start desinfo-ingest` |
+| `backend/ingest/` / `scoring/` | prochain timer hebdo ou `start desinfo-x-sync` |
 | `frontend/` | `npm run build` + `restart desinfo-frontend` |
 | `.env` | restart services concernés |
 | unit systemd | `infra/systemd/install.sh` + `daemon-reload` |
@@ -102,24 +103,46 @@ DESINFO_EXPORT_HMAC_SECRET=
 DESINFO_API_RATE_LIMIT_GET=120
 DESINFO_API_RATE_LIMIT_EXPORT=10
 OPENAI_API_KEY=          # thèmes radar
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-5.4-mini
 DESINFO_THEME_BATCH_SIZE=20
 DESINFO_THEME_MAX_PER_RUN=800
+DESINFO_X_ALLOW_TIMELINE=0
+DESINFO_X_SYNC_MIN_AGE_HOURS=168
+DESINFO_THEME_X_FETCH=cache_only
 ```
 
 ## Harvest X (crédits)
 
-- **API X = 7d only** via `counts/recent` (1 req/handle) — jamais de timeline pour 30/365.
-- **Cron** : `desinfo-x-sync.timer` — **lundi 06:00 UTC** → `scripts/sync_x_weekly.py`.
+Tarification X (pay-per-use, juil. 2026) — **ordre de coût** :
+
+| Opération | Coût | Usage desinfo |
+|-----------|------|---------------|
+| `GET /2/tweets/counts/recent` | **$0,005 / requête** | **1 req / @handle / semaine** (Post/CN 7j) |
+| Cascade 30/90/365 | $0 | somme `media_posts_daily` |
+| `GET /2/tweets?ids=` | $0,005 / tweet lu | radar thèmes **optionnel** |
+| Timeline `/users/{id}/tweets` | $0,005 / tweet paginé | **interdit** (`DESINFO_X_ALLOW_TIMELINE=0`) |
+| `counts/all` | $0,010 / req | **jamais** |
+
+**Budget type hebdo** (~44 handles) : ~**$0,22** en counts/recent. Thèmes : `DESINFO_THEME_X_FETCH=cache_only` (défaut) = **$0** ; `fetch` = ~$0,005 × tweets non cachés.
+
+Variables :
+- `DESINFO_X_ALLOW_TIMELINE=0` — pas de fallback timeline.
+- `DESINFO_X_SYNC_MIN_AGE_HOURS=168` — skip resync si déjà fait cette semaine.
+- `DESINFO_THEME_X_FETCH=cache_only|fetch|never` — texte tweet pour LLM.
+
+- **API X = 7d only** via `counts/recent` (1 req/handle unique, médias+candidats dédupliqués).
+- **Timer** : `desinfo-x-sync.timer` — **lundi 06:00 UTC** → `scripts/run_weekly.py`.
 - Stocke les buckets jour dans `media_posts_daily` + fenêtre `7d`.
-- **Cascade** (0 crédit) : somme des jours → `30d` / `90d` / `365d` dès que couverture ≥ `DESINFO_CASCADE_COVERAGE` (défaut 0.7).
-- Ingest quotidien CN : pas de sync X (sauf `--with-x-sync`) ; cascade recalculée gratuitement.
+- **Cascade** (0 crédit) : somme des jours → `30d` / `90d` / `365d` dès que couverture ≥ `DESINFO_CASCADE_COVERAGE` (défaut 0.7). Remplissage **semaine par semaine** (1 moisson 7j = ~7 buckets/jour/compte).
+- UI : fenêtres 30/90/365 **grisées et non cliquables** tant que `windows_status[w].available` est false (`/api/meta`).
+- CN : fenêtres glissantes recalculées au score depuis SQLite — pas d’ingest quotidien.
 
 ## Radar thématique (médias)
 
 - Axes : politique, santé, économie, justice, international, science, technologie, faits divers (+ `autre` hors radar).
 - Sens : **longueur ∝ nombre de CN du média** sur le thème (thème max = bord ; 0 reste à 25 % du rayon).
-- Classification : petit LLM (`OPENAI_API_KEY`, défaut `gpt-4o-mini`) en **fin d’ingest quotidien**, notes HELPFUL attribuées pas encore en `note_theme`.
+- Classification : LLM famille GPT-5 (`OPENAI_MODEL=gpt-5.4-mini`) en **fin de moisson hebdo**.
+  Contexte = **post (tweet)** + **note CN** si cache local ; sinon note seule (`DESINFO_THEME_X_FETCH=cache_only`).
 - Stockage durable : `note_theme(note_id, theme, model, scored_at)` — scores qui s’accumulent.
 - Snapshots médias : chaque item inclut `radar.axes[]` (`cn_count`, `weight`).
 - UI : clic ligne média → panneau radar. Script manuel : `scripts/classify_themes.py`.
@@ -130,7 +153,7 @@ DESINFO_THEME_MAX_PER_RUN=800
 - **PDF seul** — pas de CSV public.- Navigateur → `POST /api/export` **Next.js** (honeypot + Origin) → FastAPI avec HMAC.
 - FastAPI exige `X-Desinfo-Export-Ts` + `X-Desinfo-Export-Sig` (`DESINFO_EXPORT_HMAC_SECRET`, TTL 5 min).
 - Body `{ email, window, consent: true }` → attachment PDF watermarké.
-- E-mails stockés en SQLite `exports` (admin) ; dump CSV matin via ingest 05:00 UTC :
+- E-mails stockés en SQLite `exports` (admin) ; dump CSV hebdo via moisson lundi :
   - `data/exports_emails_latest.csv`
   - `data/exports_emails_YYYYMMDD.csv`
   - `data/exports_emails_unique_latest.csv`
@@ -181,7 +204,7 @@ pipelines d'attribution indépendants (aucun ne touche les tables de l'autre) :
 
 - `backend/ingest/pipeline.py` : `attribute_politicians(conn)` appelé juste après `attribute_notes(conn)` (même transaction) ; résultat inclut `note_politician_links`.
 - `backend/x_client/sync.py` : `sync_politicians_post_counts()` + `cascade_politician_windows()` miroir médias ; `run_weekly_harvest()` enchaîne médias puis politiques.
-- `scripts/ingest_daily.py` / `scripts/sync_x_weekly.py` : cascade + score politiques après le score médias.
+- `scripts/run_weekly.py` : pipeline hebdo (CN → thèmes → X → cascade → score). `ingest_daily.py` = CN seul (manuel).
 - **UI** : onglets Médias | Candidats 2027 ; `GET /api/ranking?kind=politicians&window=` ; défaut fenêtre = **7d** (même logique que médias).
 - Attribution CN candidats = texte/@handles uniquement (pas de lookup tweet).
 
@@ -208,8 +231,7 @@ pipelines d'attribution indépendants (aucun ne touche les tables de l'autre) :
 | Candidats 2027 | roster `politicians_roster.yml` ; UI onglet ; attribution @handle/alias |
 | `desinfo-api` | active `:8700` |
 | `desinfo-frontend` | active `:8710` |
-| `desinfo-ingest.timer` | daily 05:00 UTC (CN + score + emails CSV) |
-| `desinfo-x-sync.timer` | weekly Mon 06:00 UTC |
+| `desinfo-x-sync.timer` | weekly Mon 06:00 UTC (CN + X + score + emails CSV) |
 | DNS `desinfo.electronlibre.info` | A → `163.172.185.4` (DNS only) |
 | TLS | Let's Encrypt OK — https://desinfo.electronlibre.info |
 

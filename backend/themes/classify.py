@@ -17,10 +17,11 @@ log = logging.getLogger("desinfo.themes.classify")
 _JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
 SYSTEM_PROMPT = f"""Tu classes des Community Notes (X) en UNE thématique dominante.
+Pour chaque item tu reçois le POST (tweet original) et la NOTE (correction Community Note).
 Thèmes autorisés (ids exacts uniquement) :
 {", ".join(ALL_THEMES)}
 
-Règle d’or : classe selon le SUJET corrigé par la note (ce que le post affirmait de faux), pas selon le média cité ni la langue.
+Règle d’or : classe selon le SUJET du POST corrigé par la NOTE (l’affirmation trompeuse), en t’appuyant sur les deux textes. Ne te fie pas au média cité ni à la langue. Si le post est absent, classe quand même à partir de la note.
 
 Définitions :
 - politique : vie politique (surtout FR) — partis, élections, gouvernement, parlement, personnalités politiques, sondages, discours partisans. Si le sujet est un politicien FR/UE et sa position (même sur l’Ukraine/Europe), préfère politique.
@@ -34,7 +35,7 @@ Définitions :
 - autre : meta-média (« déjà traité à l’antenne »), humour TV, rumeurs sans thème clair, sport institutionnel (FIFA) sans autre angle, ou vraiment hors axes.
 
 Priorité en cas d’ambiguïté (du plus prioritaire) :
-1) Si une personnalité / un parti politique FR (ou candidat) est le sujet principal de la note → politique — même si le contenu porte sur l’Ukraine, l’Europe, la Crimée, etc.
+1) Si une personnalité / un parti politique FR (ou candidat) est le sujet principal → politique — même si le contenu porte sur l’Ukraine, l’Europe, la Crimée, etc.
 2) international si conflit / État / diplomatie au centre (sans personnalité FR comme sujet)
 3) justice si procès / peine / enquête judiciaire au centre
 4) sinon le thème le plus spécifique parmi les autres
@@ -60,17 +61,20 @@ def _extract_json(text: str) -> Any:
     return json.loads(raw)
 
 
-def pending_attributed_notes(limit: int, *, force: bool = False) -> list[dict[str, str]]:
-    """HELPFUL notes linked to at least one media.
+def _clip(text: str | None, limit: int = 500) -> str:
+    s = (text or "").strip().replace("\n", " ")
+    if len(s) > limit:
+        return s[: limit - 1] + "…"
+    return s
 
-    By default only notes not yet themed. With force=True, take recent attributed
-    notes regardless (for reclassification after prompt changes).
-    """
+
+def pending_attributed_notes(limit: int, *, force: bool = False) -> list[dict[str, str]]:
+    """HELPFUL notes linked to at least one media (+ tweet_id for post context)."""
     with db_session() as conn:
         if force:
             rows = conn.execute(
                 """
-                SELECT DISTINCT n.note_id, n.summary
+                SELECT DISTINCT n.note_id, n.summary, n.tweet_id
                 FROM notes n
                 JOIN note_media nm ON nm.note_id = n.note_id
                 WHERE n.is_helpful = 1
@@ -82,7 +86,7 @@ def pending_attributed_notes(limit: int, *, force: bool = False) -> list[dict[st
         else:
             rows = conn.execute(
                 """
-                SELECT DISTINCT n.note_id, n.summary
+                SELECT DISTINCT n.note_id, n.summary, n.tweet_id
                 FROM notes n
                 JOIN note_media nm ON nm.note_id = n.note_id
                 LEFT JOIN note_theme nt ON nt.note_id = n.note_id
@@ -94,19 +98,36 @@ def pending_attributed_notes(limit: int, *, force: bool = False) -> list[dict[st
             ).fetchall()
     out: list[dict[str, str]] = []
     for r in rows:
-        summary = (r["summary"] or "").strip().replace("\n", " ")
-        if len(summary) > 500:
-            summary = summary[:497] + "…"
-        out.append({"note_id": r["note_id"], "summary": summary})
+        out.append(
+            {
+                "note_id": r["note_id"],
+                "summary": _clip(r["summary"], 500),
+                "tweet_id": (r["tweet_id"] or "").strip(),
+            }
+        )
     return out
 
 
 def _classify_batch(batch: list[dict[str, str]], settings) -> dict[str, str]:
-    payload_notes = [
-        {"id": n["note_id"], "text": n["summary"] or ""} for n in batch
-    ]
+    from backend.themes.tweets import ensure_tweet_texts
+
+    tweet_ids = [n["tweet_id"] for n in batch if n.get("tweet_id")]
+    posts = ensure_tweet_texts(tweet_ids) if tweet_ids else {}
+
+    payload_notes = []
+    for n in batch:
+        tid = n.get("tweet_id") or ""
+        post = _clip(posts.get(tid), 500) if tid else ""
+        payload_notes.append(
+            {
+                "id": n["note_id"],
+                "post": post or None,
+                "note": n.get("summary") or "",
+            }
+        )
     user = (
-        "Classe chaque note. JSON array attendu.\n\n"
+        "Classe chaque item (post = tweet original, note = Community Note). "
+        "JSON array attendu.\n\n"
         + json.dumps(payload_notes, ensure_ascii=False)
     )
     max_tokens = min(4000, 40 * len(batch) + 200)
@@ -184,6 +205,14 @@ def classify_pending_notes(
             "pending_left": 0,
             "force": force,
         }
+
+    # Prefetch tweet texts once per run (fetch mode) — fewer round-trips
+    if settings.theme_x_fetch == "fetch":
+        from backend.themes.tweets import ensure_tweet_texts
+
+        all_tids = [n["tweet_id"] for n in pending if n.get("tweet_id")]
+        if all_tids:
+            ensure_tweet_texts(all_tids)
 
     classified = 0
     errors: list[str] = []

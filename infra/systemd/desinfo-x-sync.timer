@@ -1,5 +1,5 @@
 [Unit]
-Description=desinfo weekly X post-count harvest (Monday 06:00 UTC)
+Description=desinfo weekly pipeline timer (Monday 06:00 UTC)
 
 [Timer]
 OnCalendar=Mon *-*-* 06:00:00 UTC

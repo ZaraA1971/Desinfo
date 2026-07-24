@@ -47,6 +47,8 @@ export type MetaResponse = {
   windows: string[];
   windows_ready?: Record<string, string>;
   politicians_windows_ready?: Record<string, string>;
+  windows_status?: Record<string, WindowStatus>;
+  politicians_windows_status?: Record<string, WindowStatus>;
   x_sync_windows?: string[];
   next_x_sync_at?: string | null;
   roster_size: number;
@@ -56,6 +58,15 @@ export type MetaResponse = {
   last_snapshot_at: string | null;
   metric_mode: MetricMode | string;
   kinds?: RankingKind[];
+};
+
+export type WindowStatus = {
+  available: boolean;
+  metric_mode?: MetricMode | string | null;
+  progress?: number;
+  min_days?: number;
+  ready_entities?: number;
+  roster_size?: number;
 };
 
 export const WINDOWS = ["7d", "30d", "90d", "365d"] as const;

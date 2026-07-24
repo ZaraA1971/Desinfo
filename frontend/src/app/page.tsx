@@ -10,9 +10,20 @@ import {
   RankingSnapshot,
   WINDOWS,
   WindowKey,
+  WindowStatus,
   fetchMeta,
   fetchRanking,
 } from "@/lib/api";
+
+function windowTitle(w: WindowKey, st: WindowStatus | undefined): string {
+  if (!st) return w;
+  if (st.available) {
+    return st.metric_mode === "post_cn" ? "CN/Post disponible" : "CN only";
+  }
+  if (w === "7d") return w;
+  const pct = Math.round((st.progress ?? 0) * 100);
+  return `${w} — en cours (${pct} %) · se remplit par moisson hebdo`;
+}
 
 function parseKind(raw: string | null): RankingKind {
   return raw === "politicians" ? "politicians" : "media";
@@ -57,11 +68,19 @@ function HomePageInner() {
         try {
           setError(null);
           setSnap(null);
-          const [m, r] = await Promise.all([
-            fetchMeta(),
-            fetchRanking(windowKey, kind),
-          ]);
+          const m = await fetchMeta();
           setMeta(m);
+          const statusMap =
+            kind === "politicians"
+              ? m.politicians_windows_status
+              : m.windows_status;
+          let effectiveWindow = windowKey;
+          const st = statusMap?.[windowKey as WindowKey];
+          if (windowKey !== "7d" && st && !st.available) {
+            effectiveWindow = "7d";
+            replaceParams({ window: "7d" });
+          }
+          const r = await fetchRanking(effectiveWindow, kind);
           setSnap(r);
         } catch (e) {
           setError(e instanceof Error ? e.message : "Erreur de chargement");
@@ -95,10 +114,16 @@ function HomePageInner() {
       })
     : null;
 
+  const statusMap =
+    kind === "politicians"
+      ? meta?.politicians_windows_status
+      : meta?.windows_status;
   const ready =
     (kind === "politicians"
       ? meta?.politicians_windows_ready
       : meta?.windows_ready) || {};
+  const activeWindowAvailable =
+    windowKey === "7d" || statusMap?.[windowKey as WindowKey]?.available !== false;
 
   return (
     <main className="shell">
@@ -145,21 +170,22 @@ function HomePageInner() {
       <div className="toolbar">
         <div className="windows" role="group" aria-label="Fenêtre">
           {WINDOWS.map((w: WindowKey) => {
-            const mode = ready[w] || "cn_only";
+            const st = statusMap?.[w];
+            const available = w === "7d" || st?.available === true;
+            const mode = ready[w] || st?.metric_mode || "cn_only";
             return (
               <button
                 key={w}
                 type="button"
+                className={!available ? "is-pending" : ""}
                 aria-pressed={windowKey === w}
-                title={
-                  mode === "post_cn"
-                    ? "CN/Post disponible"
-                    : "CN only pour l’instant"
-                }
-                onClick={() => onWindowChange(w)}
+                aria-disabled={!available}
+                disabled={!available}
+                title={windowTitle(w, st)}
+                onClick={() => available && onWindowChange(w)}
               >
                 {w}
-                {mode === "post_cn" ? " ✓" : ""}
+                {available && mode === "post_cn" ? " ✓" : ""}
               </button>
             );
           })}
@@ -189,7 +215,7 @@ function HomePageInner() {
         <p className="empty">Chargement du palmarès…</p>
       )}
 
-      {!error && snap && windowKey && (
+      {!error && snap && activeWindowAvailable && windowKey && (
         <ExportPanel windowKey={windowKey} kind={kind} />
       )}
 
@@ -207,13 +233,14 @@ function HomePageInner() {
         <p>
           Métrique principale : <strong>CN / Posts</strong>. Fenêtre par défaut
           : 7 jours (médias et candidats). Les fenêtres 30/90/365 se
-          remplissent ensuite par cascade depuis les collectes hebdomadaires.
+          remplissent semaine par semaine par cascade (sans API X) ; elles
+          restent grisées jusqu’à couverture suffisante (~70 % du roster).
         </p>
         <p>
           Profil thématique (médias) : radar à 8 axes (politique, santé,
           économie, justice, international, science, technologie, faits
           divers). Longueur des branches proportionnelle au nombre de CN du
-          média sur chaque thème. Classification LLM en fin d’ingest quotidien.
+          média sur chaque thème. Classification LLM en fin de moisson hebdomadaire.
         </p>
         {meta && (
           <p>

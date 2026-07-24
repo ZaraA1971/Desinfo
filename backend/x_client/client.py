@@ -166,6 +166,10 @@ def count_handle_posts(
     if not allow_timeline_fallback:
         log.warning("@%s: counts unavailable, no timeline fallback", handle)
         return 0
+    settings = get_settings()
+    if not settings.x_allow_timeline:
+        log.warning("@%s: counts unavailable, timeline disabled (DESINFO_X_ALLOW_TIMELINE=0)", handle)
+        return 0
     uid = lookup_user_id(handle, client=client)
     if not uid:
         log.warning("handle introuvable: @%s", handle)
@@ -219,3 +223,69 @@ def count_user_posts_timeline(
             break
         time.sleep(0.25)
     return total
+
+
+def fetch_tweets_by_ids(
+    tweet_ids: list[str],
+    *,
+    client: httpx.Client | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Batch-fetch tweet texts via GET /2/tweets (up to 100 ids / request).
+
+    Returns {tweet_id: {"text": str|None, "lang": str|None, "status": "ok"|"missing"|"error"}}.
+    """
+    ids = [str(t).strip() for t in tweet_ids if str(t).strip()]
+    out: dict[str, dict[str, Any]] = {
+        tid: {"text": None, "lang": None, "status": "missing"} for tid in ids
+    }
+    if not ids:
+        return out
+
+    own = client is None
+    c = client or _client()
+    try:
+        for i in range(0, len(ids), 100):
+            chunk = ids[i : i + 100]
+            resp = c.get(
+                "/tweets",
+                params={
+                    "ids": ",".join(chunk),
+                    "tweet.fields": "text,lang",
+                },
+            )
+            if resp.status_code == 429:
+                reset = resp.headers.get("x-rate-limit-reset")
+                wait = 15
+                if reset and reset.isdigit():
+                    wait = max(1, int(reset) - int(time.time()) + 1)
+                log.warning("tweets lookup rate limited, sleep %ss", wait)
+                time.sleep(min(wait, 90))
+                resp = c.get(
+                    "/tweets",
+                    params={"ids": ",".join(chunk), "tweet.fields": "text,lang"},
+                )
+            if resp.status_code >= 400:
+                log.warning("tweets lookup failed %s: %s", resp.status_code, resp.text[:200])
+                for tid in chunk:
+                    out[tid] = {"text": None, "lang": None, "status": "error"}
+                continue
+            payload = resp.json()
+            for tw in payload.get("data") or []:
+                tid = str(tw.get("id") or "")
+                if not tid:
+                    continue
+                out[tid] = {
+                    "text": (tw.get("text") or "").strip() or None,
+                    "lang": tw.get("lang"),
+                    "status": "ok",
+                }
+            for err in payload.get("errors") or []:
+                # {"resource_id": "...", "detail": "..."}
+                rid = str(err.get("resource_id") or err.get("value") or "")
+                if rid in out:
+                    out[rid] = {"text": None, "lang": None, "status": "missing"}
+            time.sleep(0.15)
+    finally:
+        if own:
+            c.close()
+    return out

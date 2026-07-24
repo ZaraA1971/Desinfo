@@ -59,7 +59,7 @@ class Settings:
 
         # Theme classification (OpenAI) — radar médias
         self.openai_api_key: str | None = os.environ.get("OPENAI_API_KEY") or None
-        self.openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        self.openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
         self.openai_base_url: str = os.environ.get(
             "OPENAI_BASE_URL", "https://api.openai.com/v1"
         )
@@ -68,6 +68,18 @@ class Settings:
         )
         self.theme_batch_size: int = int(os.environ.get("DESINFO_THEME_BATCH_SIZE", "20"))
         self.theme_max_per_run: int = int(os.environ.get("DESINFO_THEME_MAX_PER_RUN", "800"))
+        # X API cost controls — see cursor.md « Harvest X »
+        self.x_allow_timeline: bool = os.environ.get("DESINFO_X_ALLOW_TIMELINE", "0") in (
+            "1",
+            "true",
+            "True",
+        )
+        self.x_sync_min_age_hours: int = int(
+            os.environ.get("DESINFO_X_SYNC_MIN_AGE_HOURS", "168")
+        )
+        # never | cache_only | fetch — tweet text for theme LLM (fetch = $0.005/tweet)
+        raw_fetch = os.environ.get("DESINFO_THEME_X_FETCH", "cache_only").strip().lower()
+        self.theme_x_fetch: str = raw_fetch if raw_fetch in ("never", "cache_only", "fetch") else "cache_only"
 
     @property
     def x_api_configured(self) -> bool:

@@ -1,5 +1,5 @@
 [Unit]
-Description=desinfo daily CN ingest timer
+Description=DEPRECATED — use desinfo-x-sync.timer (weekly pipeline)
 
 [Timer]
 OnCalendar=*-*-* 05:00:00 UTC

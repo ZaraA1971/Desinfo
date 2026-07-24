@@ -9,16 +9,16 @@ Source de vérité : `cursor.md` à la racine du projet.
 
 1. Lire `cursor.md` avant de coder.
 2. SQLite + `config/media_roster.yml` + snapshots = souverain ; UI observe.
-3. Pipeline : download → parse → attribute → score → snapshot → API → UI.
+3. Pipeline : download → parse → attribute → classify → score → snapshot → API → UI (hebdo).
 4. Uniquement notes `CURRENTLY_RATED_HELPFUL`.
 5. Pas de `post_count` inventé sans API X ; V1 = `metric_mode=cn_only`.
 6. Médias uniquement via `config/media_domains.yml` / `media_roster.yml`.
 7. Secrets dans `.env` ; services sur `127.0.0.1` (8700 API, 8710 Next).
 8. Après deploy code : restart systemd ; frontend = rebuild puis restart.
 9. Enrichir `cursor.md` à chaque phase / décision d’archi.
-10. Export public = **PDF seul** ; e-mail watermark + stocké (consent) ; CSV admin quotidien `data/exports_emails_*.csv` ; proxy Next + HMAC ; rate-limit.
+10. Export public = **PDF seul** ; e-mail watermark + stocké (consent) ; CSV admin hebdo `data/exports_emails_*.csv` ; proxy Next + HMAC ; rate-limit.
 11. API : docs off en prod ; rate-limit ; headers sécu ; `/api/export` via Next uniquement.
-12. X posts : sync **7d hebdo** (`desinfo-x-sync.timer`) ; 30/90/365 = cascade depuis `media_posts_daily` (pas d’API longue).
+12. Moisson **hebdo lundi 06:00 UTC** (`desinfo-x-sync.timer` → `run_weekly.py`) : CN + X **counts/recent** (1 req/@handle) + cascade + score ; timeline interdite ; thèmes = cache_only par défaut.
 13. Signets UI : **Médias** | **Candidats 2027** (`?kind=`) ; roster candidats = déclarés seulement (`politicians_roster.yml`) ; défaut fenêtre = `7d` pour les deux.
 14. Snapshots = `latest_*.json` atomiques seulement ; meta `next_x_sync_at` pour la prochaine moisson.
-15. Radar médias : thèmes LLM (`note_theme`) en fin d’ingest ; extérieur = plus de CN (centile vs roster).
+15. Radar médias : thèmes LLM GPT-5 (`gpt-5.4-mini`, contexte post+CN) en fin de moisson hebdo ; branches ∝ CN du média.
