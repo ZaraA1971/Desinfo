@@ -1,5 +1,6 @@
 import { Libre_Baskerville, Source_Sans_3 } from "next/font/google";
 import type { Metadata, Viewport } from "next";
+import GoatCounter from "@/components/GoatCounter";
 import "./globals.css";
 
 const display = Libre_Baskerville({
@@ -35,7 +36,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
-      <body className={`${display.variable} ${body.variable}`}>{children}</body>
+      <body className={`${display.variable} ${body.variable}`}>
+        <GoatCounter />
+        {children}
+      </body>
     </html>
   );
 }
