@@ -1,4 +1,8 @@
-"""FastAPI public API — ranking + PDF export (HMAC-gated)."""
+"""FastAPI public API — ranking + PDF export (HMAC-gated).
+
+Copyright (C) 2026 ElectronLibre / Desinfo contributors
+SPDX-License-Identifier: AGPL-3.0-only
+"""
 from __future__ import annotations
 
 import json

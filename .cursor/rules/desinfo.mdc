@@ -13,9 +13,9 @@ Source de vérité : `cursor.md` à la racine du projet.
 4. Uniquement notes `CURRENTLY_RATED_HELPFUL`.
 5. Pas de `post_count` inventé sans API X ; V1 = `metric_mode=cn_only`.
 6. Médias uniquement via `config/media_domains.yml` / `media_roster.yml`.
-7. Secrets dans `.env` ; services sur `127.0.0.1` (8700 API, 8710 Next).
+7. Secrets dans `.env` ; services sur `127.0.0.1` (8700 API, 8710 Next). Jamais committer `.env`, DB, CSV e-mails (`SECURITY.md`).
 8. Après deploy code : restart systemd ; frontend = rebuild puis restart.
-9. Enrichir `cursor.md` à chaque phase / décision d’archi.
+9. Enrichir `cursor.md` à chaque phase / décision d’archi. Dépôt public AGPL-3.0 : `github.com/ZaraA1971/Desinfo`.
 10. Export public = **PDF seul** ; e-mail watermark + stocké (consent) ; CSV admin hebdo `data/exports_emails_*.csv` ; proxy Next + HMAC ; rate-limit.
 11. API : docs off en prod ; rate-limit ; headers sécu ; `/api/export` via Next uniquement.
 12. Moisson **hebdo lundi 06:00 UTC** (`desinfo-x-sync.timer` → `run_weekly.py`) : CN + X **counts/recent** (1 req/@handle) + cascade + score ; timeline interdite ; thèmes = cache_only par défaut.
@@ -23,3 +23,5 @@ Source de vérité : `cursor.md` à la racine du projet.
 14. Snapshots = `latest_*.json` atomiques seulement ; meta `next_x_sync_at` pour la prochaine moisson.
 15. Radar : thèmes LLM en fin de moisson hebdo ; agrégation médias **et** candidats (`build_politician_radar_profiles`).
 16. **Incrémental partout** : CN = dumps post-`last_dump_date` ; attribution = notes touchées ; thèmes = backlog 7j non classifiées (priorité notes ingest) ; X = skip @handle si sync < `DESINFO_X_SYNC_MIN_AGE_HOURS` ; fenêtres longues = cascade SQLite seule.
+17. **Métrique live = 7d** (CN + posts). `30d`/`90d`/`365d` = cascade posts (`*_posts_daily`) + CN glissants — jamais d’API X longue. `cn_365d` du roster = bootstrap, pas le score UI.
+18. **Ajouter un compte** : procédure dans `cursor.md` § « Procédure — ajouter des comptes ». Médias = `media_domains.yml` + `media_roster.yml` ; candidats = `politicians_roster.yml`. Pas de `--bootstrap` après ajout manuel. Multi-comptes X sous une marque : `x_handles: [A, B]` (somme des posts 7d).

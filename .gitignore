@@ -17,18 +17,21 @@ frontend/out/
 !.env.example
 frontend/.env
 frontend/.env.*
+frontend/.env.local
+frontend/.env.*.local
 
-# Runtime data
+# Runtime data (DB, PII exports, dumps, snapshots, logs)
 data/desinfo.db
 data/desinfo.db-*
 data/raw/
 data/snapshots/
 data/exports_emails*.csv
 data/*.log
+data/**/*.log
 !data/snapshots/.gitkeep
 !data/raw/.gitkeep
 
-# OS / IDE
+# OS / IDE / keys
 .DS_Store
 *.swp
 .idea/
@@ -36,3 +39,5 @@ data/*.log
 *.pem
 *.key
 id_rsa*
+*.p12
+*.pfx

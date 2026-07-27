@@ -14,7 +14,7 @@ Référence **canonique** pour plans et implémentation. Domaine public : `desin
 5. **Pipeline souverain** — Ordre fixe : `download → parse → attribute → score → snapshot → API → UI`.
 6. **Config centralisée** — `.env` + `config/*.yml` ; pas de magic numbers dispersés.
 7. **Notes comptées** — Uniquement statut `CURRENTLY_RATED_HELPFUL` (via `noteStatusHistory`).
-8. **Métrique** — Principale : `CN / posts` (`rate_cn_per_post`, plus haut = plus densément noté). Secondaire : `posts / CN`. Sans API X : `metric_mode=cn_only`.
+8. **Métrique** — Principale : `CN / posts` (`rate_cn_per_post`, plus haut = plus densément noté). Secondaire : `posts / CN`. Sans API X : `metric_mode=cn_only`. **Fenêtre opérationnelle = `7d`** (défaut UI + moisson X). Les fenêtres `30d` / `90d` / `365d` = **cascade** posts depuis `*_posts_daily` (0 crédit API) + CN glissants SQLite — jamais de sync X longue.
 9. **Attribution V1** — Domaines dans le texte des notes → `config/media_domains.yml` → média. Pas de lookup tweet sans API.
 10. **Formules métier** — Une seule implémentation dans `backend/scoring/`.
 11. **Diagnostics** — Logs journald / `data/` ; flag `DESINFO_DEBUG=1` pour verbosité.
@@ -103,7 +103,7 @@ DESINFO_EXPORT_HMAC_SECRET=
 DESINFO_API_RATE_LIMIT_GET=120
 DESINFO_API_RATE_LIMIT_EXPORT=10
 OPENAI_API_KEY=          # thèmes radar
-OPENAI_MODEL=gpt-5.4-mini
+OPENAI_MODEL=gpt-5.4
 DESINFO_THEME_BATCH_SIZE=20
 DESINFO_THEME_MAX_PER_RUN=800
 DESINFO_X_ALLOW_TIMELINE=0
@@ -135,14 +135,180 @@ Variables :
 - Stocke les buckets jour dans `media_posts_daily` + fenêtre `7d`.
 - **Cascade** (0 crédit) : somme des jours → `30d` / `90d` / `365d` dès que couverture ≥ `DESINFO_CASCADE_COVERAGE` (défaut 0.7). Remplissage **semaine par semaine** (1 moisson 7j = ~7 buckets/jour/compte).
 - UI : fenêtres 30/90/365 **grisées et non cliquables** tant que `windows_status[w].available` est false (`/api/meta`).
-- CN : fenêtres glissantes recalculées au score depuis SQLite — pas d’ingest quotidien.
+- CN : fenêtres glissantes recalculées au score depuis SQLite — pas d’ingest quotidien. **Toujours parler CN sur la fenêtre demandée** (prod = `7d`) ; ne pas citer `cn_365d` du roster comme métrique live.
+
+## Procédure — ajouter des comptes
+
+Deux rosters distincts. **Ne pas** lancer `bootstrap_roster()` / `--bootstrap` après un ajout manuel : ça **écrase** `media_roster.yml`.
+
+### A. Média (palmarès Médias)
+
+**Fichiers** (les deux, toujours) :
+
+| Fichier | Rôle |
+|---------|------|
+| `config/media_domains.yml` | Attribution CN (domaine URL dans le texte de la note → média). Change le hash → rebuild attribution au prochain ingest. |
+| `config/media_roster.yml` | Périmètre palmarès + moisson X (`x_handle`). Sans entrée ici = pas dans l’UI. |
+
+**Champs** :
+
+```yaml
+# media_domains.yml  +  media_roster.yml (même id / name / domains / handles)
+- id: mon_media          # snake_case, stable, unique
+  name: Mon Média        # libellé UI (marque ombrelle)
+  domains:
+  - monmedia.fr          # sans www. ; sous-domaines matchés (ex. pro.monmedia.fr)
+  x_handle: MonMedia     # sans @ ; un seul compte
+  # OU plusieurs comptes sous la même marque (posts 7d = somme) :
+  # x_handles:
+  # - Bloomberg
+  # - business
+```
+
+`x_handles: [A, B]` : 1 req X par handle, **somme** dans un seul `media_id`. UI : `name` = marque ; `x_handle` affiché = le premier.
+
+Dans le **roster seulement**, garder aussi (métadonnées bootstrap, **pas** la métrique live) :
+
+```yaml
+  rank_bootstrap: 99     # rang indicatif ; incrémenter
+  cn_365d: 0             # placeholder OK ; ne pas rapporter comme score UI
+```
+
+**Checklist ajout** :
+
+1. Vérifier domaine officiel + handle X (compte vérifié / bio cohérente). Pas de faux `@…_fr` amateurs.
+2. Éditer `media_domains.yml` **et** `media_roster.yml` (entrées miroir).
+3. Activer en prod (attribution + **thèmes radar LLM** + score + API) — **obligatoire** pour un nouvel entrant :
+
+```bash
+cd /srv/desinfo
+./venv/bin/python <<'PY'
+NEW_MEDIA_IDS = {"mon_media"}  # ids ajoutés
+
+from backend.db import db_session, init_db, set_meta
+from backend.ingest.attribute import attribute_notes
+from backend.ingest.incremental import roster_config_hash
+from backend.scoring.rank import score_all_windows
+from backend.themes.classify import classify_pending_notes
+from backend.x_client.sync import cascade_longer_windows
+
+init_db()
+with db_session() as conn:
+    links = attribute_notes(conn, rebuild=True)  # obligatoire si domains.yml a changé
+    set_meta(conn, "roster_config_hash", roster_config_hash())
+    print("note_media_links:", links)
+
+# Radar : classer les CN 7d du nouvel entrant (notes sans note_theme)
+# Ne pas attendre la moisson hebdo — sinon radar vide / couverture 0.
+themes = classify_pending_notes(media_ids=NEW_MEDIA_IDS)
+print("themes:", themes)
+
+print("cascade:", cascade_longer_windows())
+print("snapshots:", [str(p) for p in score_all_windows()])
+PY
+sudo systemctl restart desinfo-api
+```
+
+`classify_pending_notes(media_ids=…)` : fenêtre **7d** seulement, notes HELPFUL déjà attribuées au média, sans thème. Si `OPENAI_API_KEY` absent → `status=skipped` (à refaire). 0 CN sur 7d → `classified=0` (normal).
+
+4. **Posts 7d** — soit attendre le timer lundi 06:00 UTC, soit (si crédits X OK) :
+
+```bash
+cd /srv/desinfo
+./venv/bin/python -c "
+from backend.x_client.sync import sync_all_post_counts, cascade_longer_windows
+from backend.scoring.rank import score_all_windows
+print(sync_all_post_counts(windows=['7d'], force_media_ids={'mon_media'}))
+print(cascade_longer_windows())
+print(score_all_windows(['7d']))
+"
+sudo systemctl restart desinfo-api
+```
+
+Les **médias** déjà sync < `DESINFO_X_SYNC_MIN_AGE_HOURS` (168 h) sont **skippés** (tous leurs handles ombrelle inclus). Forcer : `force_media_ids={'id'}`. **1 req / @handle** unique. Pas de timeline.
+
+5. Contrôle (fenêtre live = **7d**) :
+
+```bash
+curl -s 'http://127.0.0.1:8700/api/ranking?window=7d&kind=media' \
+  | ./venv/bin/python -c "import sys,json; d=json.load(sys.stdin); print('n=',len(d.get('items')or[]));
+[print(i['rank'], i['media_id'], i['name'], 'cn=',i['cn_count'], 'posts=',i['post_count'],
+      'radar_cov=',(i.get('radar') or {}).get('coverage')) for i in d.get('items')or[] if i['media_id']=='mon_media']"
+```
+
+**Attentes normales** :
+
+| Délai | CN 7d | posts 7d | radar 7d | 30/90/365 |
+|-------|-------|----------|----------|-----------|
+| Juste après attribution + thèmes | oui (si notes HELPFUL avec URL) | `null` → souvent bas de liste | axes renseignés si CN>0 | indisponibles / cascade incomplete |
+| Après 1 moisson X hebdo | idem | rempli (`counts/recent`) | idem | commence à se remplir |
+| Après plusieurs moissons | idem | idem | thèmes stockés réutilisés | cascade OK si couverture ≥ 0.7 |
+
+Ne jamais sync X sur 30/90/365. Ne pas citer `cn_365d` du YAML comme score. Frontend : **pas** de rebuild (données via API/snapshots).
+
+### B. Candidat 2027 (onglet Candidats)
+
+**Fichier unique** : `config/politicians_roster.yml` (pas de bootstrap auto).
+
+```yaml
+  - id: prenom_nom
+    name: Prénom Nom
+    party: Parti
+    x_handle: HandleX          # sans @
+    aliases: ["Prénom Nom", "@HandleX"]   # formes dans le texte des CN
+```
+
+Puis même enchaînement attribution / **thèmes radar** / score / X, côté politiques :
+
+```bash
+cd /srv/desinfo
+./venv/bin/python <<'PY'
+NEW_POL_IDS = {"prenom_nom"}  # ids ajoutés
+
+from backend.db import db_session, init_db, set_meta
+from backend.politicians.attribute import attribute_politicians
+from backend.ingest.incremental import roster_config_hash
+from backend.politicians.rank import score_all_politicians_windows
+from backend.themes.classify import classify_pending_notes
+from backend.x_client.sync import cascade_politician_windows
+
+init_db()
+with db_session() as conn:
+    links = attribute_politicians(conn, rebuild=True)
+    set_meta(conn, "roster_config_hash", roster_config_hash())
+    print("note_politician_links:", links)
+
+themes = classify_pending_notes(politician_ids=NEW_POL_IDS)
+print("themes:", themes)
+
+print("cascade:", cascade_politician_windows())
+print("snapshots:", [str(p) for p in score_all_politicians_windows()])
+PY
+sudo systemctl restart desinfo-api
+# Posts 7d : moisson hebdo (médias+candidats dédupliqués) ou sync_all_post_counts(force_politician_ids=…)
+```
+
+Contrôle : `GET /api/ranking?window=7d&kind=politicians`.
+
+### Interdits
+
+- Inventer `post_count` / hardcoder un ratio.
+- `--bootstrap` après trim/ajouts manuels du roster médias.
+- Timeline X ou `counts/all` pour « rattraper » un nouveau compte.
+- Ajouter un média seulement dans un des deux YAML médias.
+- Oublier le LLM thèmes (`classify_pending_notes`) après un nouvel entrant → radar vide sur 7d.
 
 ## Radar thématique (médias + candidats)
 
 - Axes : politique, santé, économie, justice, international, science, technologie, faits divers (+ `autre` hors radar).
 - Sens : **longueur ∝ nombre de CN** sur le thème (max = bord ; 0 reste à 25 % du rayon).
 - Classification : LLM en fin de moisson hebdo — **fenêtre 7j courante seulement** (notes média ou candidat sans thème).
-  Les fenêtres 30/90/365 réutilisent les thèmes déjà stockés (`note_theme`) + la base CN accumulée à chaque ingest hebdo — pas de re-classification LLM.
+  Prompt agnostique : classer selon le **cœur de la correction** (pas le décor / mots-clés incidental) — `backend/themes/classify.py` `SYSTEM_PROMPT`.
+  Modèle : `OPENAI_MODEL` (prod = `gpt-5.4`). Hebdo = **7d** seulement ; 30/90/365 réutilisent `note_theme`.
+  **Nouvel entrant** : lancer tout de suite `classify_pending_notes(media_ids=…)` / `(politician_ids=…)` (voir procédure ci-dessus) — ne pas attendre le lundi.
+  **Reclassif homogène** (changement prompt/modèle) :
+  `DESINFO_THEME_X_FETCH=cache_only ./venv/bin/python scripts/classify_themes.py --reclassify-all-in-window --window 365d`
+  (évite de brûler des crédits X ; tweets absents du cache → note seule).
 - Agrégation : `build_radar_profiles` (médias), `build_politician_radar_profiles` (candidats).
 - Snapshots : chaque item inclut `radar.axes[]` (`cn_count`, `weight`).
 - UI : clic ligne → panneau radar (médias et candidats). Script manuel : `scripts/classify_themes.py`.
@@ -179,10 +345,17 @@ Variables :
 - `/api/meta` expose `next_x_sync_at` (prochain lundi 06:00 UTC) ; UI : `· moisson lun. 27 juil.`
 - `deploy/nginx/*.acme-bootstrap.conf.example` = stub ACME historique, pas le vhost prod.
 
+## Open source
+
+- Dépôt public : [github.com/ZaraA1971/Desinfo](https://github.com/ZaraA1971/Desinfo)
+- Licence : **AGPL-3.0** (`LICENSE`) — service réseau → obligation de fournir le source correspondant.
+- Secrets / PII **hors git** : `.env`, `data/desinfo.db*`, `data/exports_emails*.csv`, snapshots, dumps (`SECURITY.md`).
+- Avant/après passage en public : **rotation** `X_BEARER_TOKEN`, `OPENAI_API_KEY`, `DESINFO_EXPORT_HMAC_SECRET` puis `systemctl restart desinfo-api desinfo-frontend`.
+
 ## Checklist revue
 
-- [ ] `cursor.md` à jour si décision d’archi
-- [ ] Pas de secrets committés (`.env`)
+- [x] `cursor.md` à jour si décision d’archi
+- [x] Pas de secrets committés (`.env`) — voir `SECURITY.md` + `.gitignore`
 - [x] Snapshot atomique (temp → replace) — `latest_*` seulement
 - [ ] Diff proportionné ; pas de refactor hors phase
 - [ ] Mode métrique explicite dans le snapshot (`cn_only` / `post_cn`)
@@ -211,6 +384,7 @@ pipelines d'attribution indépendants (aucun ne touche les tables de l'autre) :
 ## Ingest CN (détails)
 
 - **Incrémental** : seuls les dumps **postérieurs** à `last_dump_date` (meta) sont téléchargés/parsés ; skip si déjà à jour. Legacy : `last_dump_date` initialisé depuis `dump_date` au 1er run.
+- Un jour n’est « prêt » que si `notes-00000.zip` **et** `noteStatusHistory-00000.zip` sont publiés (sinon skip — au petit matin UTC le status peut manquer encore). Commit **par jour** pour ne pas perdre les dumps déjà OK.
 - 1ère moisson : dernier dump disponible ; ensuite +1 dump/jour max par semaine (rattrapage si retard).
 - Attribution médias/candidats : **notes touchées uniquement** (rebuild complet si hash roster change).
 - Thèmes LLM : **7j courants**, notes sans `note_theme` ; après ingest, filtre sur `touched_note_ids` quand disponible.
@@ -224,13 +398,13 @@ pipelines d'attribution indépendants (aucun ne touche les tables de l'autre) :
 | Élément | État |
 |---------|------|
 | Code | `/srv/desinfo` |
-| Roster | **21** médias actifs X (trim 2026-07-23) |
+| Roster | **24** médias actifs X (+ Public Sénat, Bloomberg, AFP 2026-07-26) |
 | Notes HELPFUL en base | ~248 729 |
-| Liens note↔média | ~10 158 |
-| metric_mode | `post_cn` sur 7d ; 30/90/365 via cascade quand couverture jours OK |
-| X sync | **hebdo lundi 06:00 UTC** (`desinfo-x-sync.timer`) — 7d only |
-| Cascade | `media_posts_daily` → 30d/90d/365d sans API |
-| Défaut UI | `7d` (médias + candidats) |
+| Liens note↔média | ~7 980 (rebuild attribution 2026-07-26) |
+| metric_mode | **`post_cn` sur 7d** (fenêtre live) ; 30/90/365 = cascade posts + CN SQLite quand couverture OK |
+| X sync | **hebdo lundi 06:00 UTC** (`desinfo-x-sync.timer`) — **7d only** |
+| Cascade | `media_posts_daily` → 30d/90d/365d **sans API** (ne pas sync X longue) |
+| Défaut UI | **`7d`** (médias + candidats) — ne pas rapporter les CN sur 365d comme métrique prod |
 | Moisson X UI | `next_x_sync_at` → libellé compact `moisson lun. …` |
 | X API | crédits préservés — pas de timeline longue |
 | Candidats 2027 | roster `politicians_roster.yml` ; UI onglet ; attribution @handle/alias |
