@@ -417,6 +417,16 @@ footer {
   font-size: 0.85rem;
 }
 
+footer p {
+  margin: 0 0 0.5rem;
+  max-width: 38rem;
+  line-height: 1.5;
+}
+
+footer .transparency {
+  margin-bottom: 0;
+}
+
 .row-clickable {
   cursor: pointer;
 }

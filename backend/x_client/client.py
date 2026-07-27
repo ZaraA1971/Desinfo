@@ -31,10 +31,7 @@ class XApiError(RuntimeError):
 def _client() -> httpx.Client:
     settings = get_settings()
     if not settings.x_bearer_token:
-        raise XApiNotConfigured(
-            "X_BEARER_TOKEN manquant dans .env "
-            "(X_API_KEY/SECRET seuls ne suffisent pas pour les lectures app-only)."
-        )
+        raise XApiNotConfigured("X_BEARER_TOKEN manquant dans .env")
     return httpx.Client(
         base_url=API_BASE,
         headers={"Authorization": f"Bearer {settings.x_bearer_token}"},

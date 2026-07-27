@@ -46,8 +46,6 @@ class Settings:
             "https://ton.twimg.com/birdwatch-public-data",
         )
 
-        self.x_api_key: str | None = os.environ.get("X_API_KEY") or None
-        self.x_api_secret: str | None = os.environ.get("X_API_SECRET") or None
         self.x_bearer_token: str | None = os.environ.get("X_BEARER_TOKEN") or None
         self.export_max_per_hour: int = int(os.environ.get("DESINFO_EXPORT_MAX_PER_HOUR", "5"))
         self.export_hmac_secret: str = os.environ.get("DESINFO_EXPORT_HMAC_SECRET", "") or ""
@@ -59,7 +57,7 @@ class Settings:
 
         # Theme classification (OpenAI) — radar médias
         self.openai_api_key: str | None = os.environ.get("OPENAI_API_KEY") or None
-        self.openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
+        self.openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.4")
         self.openai_base_url: str = os.environ.get(
             "OPENAI_BASE_URL", "https://api.openai.com/v1"
         )
@@ -83,7 +81,7 @@ class Settings:
 
     @property
     def x_api_configured(self) -> bool:
-        return bool(self.x_bearer_token or (self.x_api_key and self.x_api_secret))
+        return bool(self.x_bearer_token)
 
     @property
     def openai_configured(self) -> bool:
