@@ -10,6 +10,7 @@ import logging
 import sqlite3
 from typing import Any
 
+from backend.db import execute_by_ids, fetchall_by_ids
 from backend.politicians.config import load_politicians_roster
 
 log = logging.getLogger("desinfo.politicians.attribute")
@@ -66,15 +67,16 @@ def attribute_politicians(
         conn.execute("DELETE FROM note_politician")
         log.info("politician attribution rebuild")
     elif note_ids:
-        if not note_ids:
+        ids = list(note_ids)
+        if not ids:
             log.info("politician attribution incremental — 0 notes")
             return 0
-        placeholders = ",".join("?" * len(note_ids))
-        conn.execute(
-            f"DELETE FROM note_politician WHERE note_id IN ({placeholders})",
-            list(note_ids),
+        execute_by_ids(
+            conn,
+            "DELETE FROM note_politician WHERE note_id IN ({placeholders})",
+            ids,
         )
-        log.info("politician attribution incremental — %s notes", len(note_ids))
+        log.info("politician attribution incremental — %s notes", len(ids))
     else:
         log.info("politician attribution backfill unlinked")
 
@@ -91,14 +93,14 @@ def attribute_politicians(
             "SELECT note_id, summary FROM notes WHERE is_helpful=1"
         ).fetchall()
     elif note_ids:
-        placeholders = ",".join("?" * len(note_ids))
-        rows = conn.execute(
-            f"""
+        rows = fetchall_by_ids(
+            conn,
+            """
             SELECT note_id, summary FROM notes
             WHERE is_helpful=1 AND note_id IN ({placeholders})
             """,
             list(note_ids),
-        ).fetchall()
+        )
     else:
         rows = conn.execute(
             """

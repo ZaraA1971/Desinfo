@@ -4,9 +4,56 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Iterable, Iterator, Sequence, TypeVar
 
 from backend.config import get_settings
+
+# Default SQLITE_MAX_VARIABLE_NUMBER is often 999 on Debian builds — stay under it.
+SQLITE_IN_CHUNK = 500
+
+T = TypeVar("T")
+
+
+def chunked(items: Iterable[T], size: int = SQLITE_IN_CHUNK) -> Iterator[list[T]]:
+    """Yield lists of at most `size` items (for SQLite IN (?) batches)."""
+    if size < 1:
+        raise ValueError("chunk size must be >= 1")
+    buf: list[T] = []
+    for item in items:
+        buf.append(item)
+        if len(buf) >= size:
+            yield buf
+            buf = []
+    if buf:
+        yield buf
+
+
+def fetchall_by_ids(
+    conn: sqlite3.Connection,
+    sql_in: str,
+    ids: Sequence[T],
+    *,
+    chunk_size: int = SQLITE_IN_CHUNK,
+) -> list[sqlite3.Row]:
+    """Run `sql_in` once per chunk. `sql_in` must contain a single `{placeholders}`."""
+    rows: list[sqlite3.Row] = []
+    for chunk in chunked(ids, chunk_size):
+        placeholders = ",".join("?" * len(chunk))
+        rows.extend(conn.execute(sql_in.format(placeholders=placeholders), chunk).fetchall())
+    return rows
+
+
+def execute_by_ids(
+    conn: sqlite3.Connection,
+    sql_in: str,
+    ids: Sequence[T],
+    *,
+    chunk_size: int = SQLITE_IN_CHUNK,
+) -> None:
+    """Execute `sql_in` once per chunk. `sql_in` must contain a single `{placeholders}`."""
+    for chunk in chunked(ids, chunk_size):
+        placeholders = ",".join("?" * len(chunk))
+        conn.execute(sql_in.format(placeholders=placeholders), chunk)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS notes (

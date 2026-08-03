@@ -243,22 +243,21 @@ function HomePageInner() {
           proportionnelle au nombre de CN sur chaque thème. Classification LLM
           en fin de moisson hebdomadaire.
         </p>
-        {meta && (
-          <p>
-            Roster médias : {meta.roster_size}
-            {meta.politicians_roster_size != null
-              ? ` · candidats : ${meta.politicians_roster_size}`
-              : ""}
-            .
-          </p>
-        )}
       </section>
 
       <footer>
-        Accès libre · Electron Libre ·{" "}
-        <a href="https://desinfo.electronlibre.info">
-          desinfo.electronlibre.info
-        </a>
+        <p className="transparency">
+          Service critique : code et méthode en accès libre (AGPL), pour que
+          chacun puisse vérifier comment le palmarès est produit —{" "}
+          <a
+            href="https://github.com/ZaraA1971/Desinfo"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            dépôt GitHub
+          </a>
+          .
+        </p>
       </footer>
     </main>
   );

@@ -90,9 +90,7 @@ DESINFO_FRONTEND_PORT=8710
 DESINFO_DEFAULT_WINDOW=7d
 DESINFO_BOOTSTRAP_DAYS=365
 DESINFO_ROSTER_MIN_CN=3
-X_API_KEY=          # optionnel V1
-X_API_SECRET=
-X_BEARER_TOKEN=
+X_BEARER_TOKEN=     # seul credential X (app-only)
 DESINFO_X_SYNC_WINDOWS=7d
 DESINFO_CASCADE_WINDOWS=30d,90d,365d
 DESINFO_CASCADE_COVERAGE=0.7
@@ -344,6 +342,12 @@ Contrôle : `GET /api/ranking?window=7d&kind=politicians`.
 - Snapshots : écriture atomique `*.json.tmp` → replace ; uniquement `latest_*.json` (pas d’archives datées).
 - `/api/meta` expose `next_x_sync_at` (prochain lundi 06:00 UTC) ; UI : `· moisson lun. 27 juil.`
 - `deploy/nginx/*.acme-bootstrap.conf.example` = stub ACME historique, pas le vhost prod.
+
+## Ingest — garde-fous SQLite
+
+- Les `IN (?,?,…)` sur des milliers de `note_id` (rattrapage multi-jours) dépassent `SQLITE_MAX_VARIABLE_NUMBER` (souvent 999) → `too many SQL variables`.
+- Helper `backend/db.py` : `chunked` / `execute_by_ids` / `fetchall_by_ids` (`SQLITE_IN_CHUNK=500`) pour attribution médias/candidats et scope thèmes.
+- Échec d’attribution **après** commit par jour : les dumps sont déjà en base (`last_dump_date` avancé) — relancer un backfill `attribute_notes()` / `attribute_politicians()` (notes sans lien) puis moisson thèmes/X/score.
 
 ## Open source
 

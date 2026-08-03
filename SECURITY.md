@@ -30,7 +30,7 @@ Use [`.env.example`](.env.example) as the template only.
 
 Rotate these in production `.env`, then restart services:
 
-1. `X_BEARER_TOKEN` (and X API key/secret if used) — [developer.x.com](https://developer.x.com)
+1. `X_BEARER_TOKEN` — [developer.x.com](https://developer.x.com)
 2. `OPENAI_API_KEY` — OpenAI dashboard
 3. `DESINFO_EXPORT_HMAC_SECRET` — generate a new random value, update `.env` for **API and Next** (`frontend` env / systemd)
 
