@@ -7,7 +7,8 @@ import sqlite3
 from typing import Any
 from urllib.parse import urlparse
 
-from backend.media_config import build_domain_index, load_media_domains
+from backend.db import execute_by_ids, fetchall_by_ids
+from backend.media_config import build_domain_index, load_media_domains, primary_x_handle
 
 log = logging.getLogger("desinfo.ingest.attribute")
 
@@ -58,7 +59,7 @@ def sync_media_table(conn: sqlite3.Connection, media_list: list[dict[str, Any]])
                 domains=excluded.domains,
                 x_handle=excluded.x_handle
             """,
-            (m["id"], m["name"], domains, m.get("x_handle")),
+            (m["id"], m["name"], domains, primary_x_handle(m)),
         )
 
 
@@ -85,21 +86,23 @@ def attribute_notes(
         ).fetchall()
         log.info("media attribution rebuild — %s helpful notes", len(rows))
     elif note_ids:
-        if not note_ids:
+        ids = list(note_ids)
+        if not ids:
             log.info("media attribution incremental — 0 notes")
             return 0
-        placeholders = ",".join("?" * len(note_ids))
-        conn.execute(
-            f"DELETE FROM note_media WHERE note_id IN ({placeholders})",
-            list(note_ids),
+        execute_by_ids(
+            conn,
+            "DELETE FROM note_media WHERE note_id IN ({placeholders})",
+            ids,
         )
-        rows = conn.execute(
-            f"""
+        rows = fetchall_by_ids(
+            conn,
+            """
             SELECT note_id, summary FROM notes
             WHERE is_helpful=1 AND note_id IN ({placeholders})
             """,
-            list(note_ids),
-        ).fetchall()
+            ids,
+        )
         log.info("media attribution incremental — %s notes", len(rows))
     else:
         rows = conn.execute(

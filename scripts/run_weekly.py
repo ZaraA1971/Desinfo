@@ -73,7 +73,11 @@ def main() -> int:
 
     if not args.cascade_only:
         result = run_ingest(skip_download=args.skip_download, full=args.full_ingest)
-        print("ingest:", result)
+        # Avoid dumping tens of thousands of note ids into journald.
+        print(
+            "ingest:",
+            {k: v for k, v in result.items() if k != "touched_note_ids"},
+        )
 
         roster = load_or_bootstrap(args.bootstrap)
         print("roster_size:", len(roster.get("media") or []))
@@ -82,7 +86,12 @@ def main() -> int:
             touched: set[str] | None = None
             if result.get("status") == "ok" and result.get("touched_note_ids"):
                 touched = set(result["touched_note_ids"])
-            themes = classify_pending_notes(limit=args.theme_limit, note_ids=touched)
+            # Hebdo = 7d only (jamais 30/90/365 — ces fenêtres réutilisent note_theme)
+            themes = classify_pending_notes(
+                limit=args.theme_limit,
+                note_ids=touched,
+                window_key="7d",
+            )
             print("themes:", themes)
         else:
             print("themes: skipped")

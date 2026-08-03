@@ -343,6 +343,12 @@ Contrôle : `GET /api/ranking?window=7d&kind=politicians`.
 - `/api/meta` expose `next_x_sync_at` (prochain lundi 06:00 UTC) ; UI : `· moisson lun. 27 juil.`
 - `deploy/nginx/*.acme-bootstrap.conf.example` = stub ACME historique, pas le vhost prod.
 
+## Ingest — garde-fous SQLite
+
+- Les `IN (?,?,…)` sur des milliers de `note_id` (rattrapage multi-jours) dépassent `SQLITE_MAX_VARIABLE_NUMBER` (souvent 999) → `too many SQL variables`.
+- Helper `backend/db.py` : `chunked` / `execute_by_ids` / `fetchall_by_ids` (`SQLITE_IN_CHUNK=500`) pour attribution médias/candidats et scope thèmes.
+- Échec d’attribution **après** commit par jour : les dumps sont déjà en base (`last_dump_date` avancé) — relancer un backfill `attribute_notes()` / `attribute_politicians()` (notes sans lien) puis moisson thèmes/X/score.
+
 ## Open source
 
 - Dépôt public : [github.com/ZaraA1971/Desinfo](https://github.com/ZaraA1971/Desinfo)

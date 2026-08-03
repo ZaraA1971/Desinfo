@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from backend.config import get_settings
-from backend.db import db_session, set_meta
+from backend.db import SQLITE_IN_CHUNK, chunked, db_session, set_meta
 from backend.scoring.rank import WINDOW_DAYS, _ms_since
 from backend.themes.openai_chat import post_chat_completion
 from backend.themes.taxonomy import ALL_THEMES, RADAR_THEMES, normalize_theme
@@ -22,32 +22,32 @@ Pour chaque item tu reçois le POST (tweet original) et la NOTE (correction Comm
 Thèmes autorisés (ids exacts uniquement) :
 {", ".join(ALL_THEMES)}
 
-Règle d’or : classe selon le SUJET du POST corrigé par la NOTE (l’affirmation trompeuse), en t’appuyant sur les deux textes. Ne te fie pas au média cité ni à la langue. Si le post est absent, classe quand même à partir de la note.
+Méthode (dans cet ordre) :
+1) Quelle est l’affirmation trompeuse du POST ?
+2) Que corrige réellement la NOTE — le cœur de la rectification ?
+3) Choisis le thème de ce cœur, pas le décor (lieu, événement, marque, sport, etc. mentionnés en arrière-plan).
+Ne te fie pas au média cité ni à la langue. Si le post est absent, classe à partir de la note seule.
 
-Définitions :
-- politique : vie politique (surtout FR) — partis, élections, gouvernement, parlement, personnalités politiques, sondages, discours partisans. Si le sujet est un politicien FR/UE et sa position (même sur l’Ukraine/Europe), préfère politique.
-- sante : santé publique, médecine, vaccins, hôpitaux, épidémies, médicaments, nutrition médicale. PAS un simple fait divers avec blessé si le cœur n’est pas médical.
-- economie : entreprises, marchés, finance, inflation, budget, emploi, commerce, IPO, banques centrales.
-- justice : procédures judiciaires, tribunaux, police judiciaire, peines, enquêtes criminelles formelles, procès. Un crime « fait divers » sans angle judiciaire → faits_divers.
-- international : géopolitique, guerres, diplomatie, États étrangers, conflits, OTAN, sans que le cœur soit une polémique partisane FR.
-- science : recherche scientifique, climat/environnement scientifique, espace/NASA, études, physique, biologie. Chemtrails / pseudo-science → science.
-- technologie : produits numériques, IA générative, plateformes tech, cybersécurité, deepfakes techniques, bugs. Un conflit géopolitique qui mentionne Google/IA → international (sauf si la note corrige un point purement technique/IA).
-- faits_divers : accidents, incendies, crimes isolés, sport/divertissement, images trompeuses de scènes locales sans enjeu politique. JAMAIS pour guerre, diplomatie, pétrole/sanctions d’État, élections.
-- autre : meta-média (« déjà traité à l’antenne »), humour TV, rumeurs sans thème clair, sport institutionnel (FIFA) sans autre angle, ou vraiment hors axes.
+Définitions (par nature du sujet corrigé) :
+- politique : vie politique (surtout FR) — partis, élections, gouvernement, parlement, personnalités politiques, sondages, discours partisans. Un politicien FR/UE comme sujet principal → politique, même si le propos porte sur l’étranger.
+- sante : santé publique, médecine, vaccins, hôpitaux, épidémies, médicaments. Pas un fait divers avec blessé si le cœur n’est pas médical.
+- economie : entreprises, marchés, finance, inflation, budget, emploi, commerce.
+- justice : procédures judiciaires, tribunaux, peines, enquêtes formelles, procès. Crime isolé sans angle judiciaire → faits_divers.
+- international : géopolitique, guerres, diplomatie, États, conflits — sans que le cœur soit une polémique partisane FR.
+- science : recherche, climat/environnement scientifique, espace, études. Pseudo-science → science.
+- technologie : nature technique ou numérique de la tromperie ou du sujet (fabrication synthétique, plateformes, cybersécurité, bugs, robots, etc.). Si le décor est géopolitique mais que la note porte sur l’artefact technique → technologie.
+- faits_divers : accidents, incendies, crimes isolés, divertissement/sport comme sujet principal (pas simple décor), scènes locales trompeuses sans enjeu politique/international.
+- autre : meta-média, humour sans enjeu, ou vraiment hors des axes — seulement si aucun autre thème ne décrit le cœur de la correction.
 
-Priorité en cas d’ambiguïté (du plus prioritaire) :
-1) Si une personnalité / un parti politique FR (ou candidat) est le sujet principal → politique — même si le contenu porte sur l’Ukraine, l’Europe, la Crimée, etc.
-2) international si conflit / État / diplomatie au centre (sans personnalité FR comme sujet)
-3) justice si procès / peine / enquête judiciaire au centre
-4) sinon le thème le plus spécifique parmi les autres
-5) autre en dernier recours
+Ambiguïté : préférer le thème le plus spécifique au cœur de la correction ; autre en dernier recours.
+Si un élément du décor entre en conflit avec le cœur, le cœur gagne toujours.
 
-Exemples :
-- « Marine Le Pen a nié l’annexion de la Crimée » → politique
-- « Attaque dans le détroit d’Ormuz » → international
-- « Vidéo d’incendie de marché sans lien avec une guerre » → faits_divers
-- « Image générée par IA d’un animal » → technologie
-- « Manifestation contre les contrats Google/Israël » → international
+Exemples de raisonnement :
+- Personnalité politique FR + propos sur l’étranger → politique (cœur = l’acteur politique)
+- Conflit / État au centre de la tromperie → international
+- Note qui établit surtout qu’un média est fabriqué / synthétique / truqué techniquement → technologie (même si le décor est un stade, une guerre ou un animal)
+- Incendie local présenté à tort comme une attaque militaire → international si la tromperie porte sur le conflit ; faits_divers si le cœur est juste la mauvaise scène locale
+- Contrats tech + conflit géopolitique au centre → international
 
 Réponds UNIQUEMENT un JSON array valide :
 [{{"id":"<note_id>","theme":"<id>"}}]
@@ -79,10 +79,56 @@ def _attributed_clause() -> str:
 
 
 def _classify_window_key(window_key: str | None) -> str:
+    """
+    Weekly moisson = 7d only. Maintenance (reclassif homogène) may use
+    30d/90d/365d/all — longer UI windows then reuse stored note_theme.
+    """
     key = (window_key or "7d").strip().lower()
-    if key != "7d":
-        raise ValueError("theme classification supports window 7d only (longer windows use stored themes)")
+    if key == "all":
+        return key
+    if key not in WINDOW_DAYS:
+        raise ValueError(
+            f"theme classification window must be one of "
+            f"{sorted(WINDOW_DAYS)} or 'all', got {window_key!r}"
+        )
     return key
+
+
+def _scope_filters(
+    *,
+    note_ids: set[str] | None = None,
+    media_ids: set[str] | None = None,
+    politician_ids: set[str] | None = None,
+) -> tuple[str, list[Any]]:
+    """Extra AND clauses + params for note / media / politician scoping.
+
+    `note_ids` must already fit under SQLITE_IN_CHUNK (caller chunks if needed).
+    """
+    clauses: list[str] = []
+    params: list[Any] = []
+    if note_ids is not None:
+        if not note_ids:
+            return " AND 0", []
+        placeholders = ",".join("?" * len(note_ids))
+        clauses.append(f"n.note_id IN ({placeholders})")
+        params.extend(note_ids)
+    if media_ids:
+        placeholders = ",".join("?" * len(media_ids))
+        clauses.append(
+            f"EXISTS (SELECT 1 FROM note_media nm "
+            f"WHERE nm.note_id = n.note_id AND nm.media_id IN ({placeholders}))"
+        )
+        params.extend(media_ids)
+    if politician_ids:
+        placeholders = ",".join("?" * len(politician_ids))
+        clauses.append(
+            f"EXISTS (SELECT 1 FROM note_politician np "
+            f"WHERE np.note_id = n.note_id AND np.politician_id IN ({placeholders}))"
+        )
+        params.extend(politician_ids)
+    if not clauses:
+        return "", []
+    return " AND " + " AND ".join(clauses), params
 
 
 def pending_attributed_notes(
@@ -91,67 +137,89 @@ def pending_attributed_notes(
     force: bool = False,
     window_key: str = "7d",
     note_ids: set[str] | None = None,
+    media_ids: set[str] | None = None,
+    politician_ids: set[str] | None = None,
     now: datetime | None = None,
 ) -> list[dict[str, str]]:
     """HELPFUL notes in the classify window (7d) linked to media or politician."""
     window_key = _classify_window_key(window_key)
-    since_ms = _ms_since(WINDOW_DAYS[window_key], now)
+    since_ms = 0 if window_key == "all" else _ms_since(WINDOW_DAYS[window_key], now)
     attributed = _attributed_clause()
-    id_filter = ""
-    id_params: list[Any] = []
-    if note_ids is not None:
-        if not note_ids:
-            return []
-        placeholders = ",".join("?" * len(note_ids))
-        id_filter = f" AND n.note_id IN ({placeholders})"
-        id_params = list(note_ids)
-    with db_session() as conn:
-        if force:
-            rows = conn.execute(
-                f"""
-                SELECT DISTINCT n.note_id, n.summary, n.tweet_id
-                FROM notes n
-                WHERE n.is_helpful = 1
-                  AND n.created_at_ms >= ?
-                  AND {attributed}
-                  {id_filter}
-                ORDER BY n.created_at_ms DESC
-                LIMIT ?
-                """,
-                (since_ms, *id_params, limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                f"""
-                SELECT DISTINCT n.note_id, n.summary, n.tweet_id
-                FROM notes n
-                LEFT JOIN note_theme nt ON nt.note_id = n.note_id
-                WHERE n.is_helpful = 1
-                  AND n.created_at_ms >= ?
-                  AND nt.note_id IS NULL
-                  AND {attributed}
-                  {id_filter}
-                ORDER BY n.created_at_ms DESC
-                LIMIT ?
-                """,
-                (since_ms, *id_params, limit),
-            ).fetchall()
-    out: list[dict[str, str]] = []
-    for r in rows:
-        out.append(
-            {
-                "note_id": r["note_id"],
-                "summary": _clip(r["summary"], 500),
-                "tweet_id": (r["tweet_id"] or "").strip(),
-            }
-        )
-    return out
 
+    if note_ids is not None and not note_ids:
+        return []
+
+    # Large ingest touch-sets exceed SQLITE_MAX_VARIABLE_NUMBER — query by chunks.
+    id_chunks: list[set[str] | None]
+    if note_ids is not None and len(note_ids) > SQLITE_IN_CHUNK:
+        id_chunks = [set(chunk) for chunk in chunked(note_ids, SQLITE_IN_CHUNK)]
+    else:
+        id_chunks = [note_ids]
+
+    seen: set[str] = set()
+    out: list[dict[str, str]] = []
+    with db_session() as conn:
+        for chunk_ids in id_chunks:
+            if len(out) >= limit:
+                break
+            scope_sql, scope_params = _scope_filters(
+                note_ids=chunk_ids,
+                media_ids=media_ids,
+                politician_ids=politician_ids,
+            )
+            if scope_sql == " AND 0":
+                continue
+            remain = limit - len(out)
+            if force:
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT n.note_id, n.summary, n.tweet_id
+                    FROM notes n
+                    WHERE n.is_helpful = 1
+                      AND n.created_at_ms >= ?
+                      AND {attributed}
+                      {scope_sql}
+                    ORDER BY n.created_at_ms DESC
+                    LIMIT ?
+                    """,
+                    (since_ms, *scope_params, remain),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT n.note_id, n.summary, n.tweet_id
+                    FROM notes n
+                    LEFT JOIN note_theme nt ON nt.note_id = n.note_id
+                    WHERE n.is_helpful = 1
+                      AND n.created_at_ms >= ?
+                      AND nt.note_id IS NULL
+                      AND {attributed}
+                      {scope_sql}
+                    ORDER BY n.created_at_ms DESC
+                    LIMIT ?
+                    """,
+                    (since_ms, *scope_params, remain),
+                ).fetchall()
+            for r in rows:
+                nid = r["note_id"]
+                if nid in seen:
+                    continue
+                seen.add(nid)
+                out.append(
+                    {
+                        "note_id": nid,
+                        "summary": _clip(r["summary"], 500),
+                        "tweet_id": (r["tweet_id"] or "").strip(),
+                    }
+                )
+                if len(out) >= limit:
+                    break
+    return out
 
 def count_pending_themes(*, window_key: str = "7d", now: datetime | None = None) -> int:
     """Unclassified attributed notes in the classify window (default 7d)."""
     window_key = _classify_window_key(window_key)
-    since_ms = _ms_since(WINDOW_DAYS[window_key], now)
+    since_ms = 0 if window_key == "all" else _ms_since(WINDOW_DAYS[window_key], now)
     with db_session() as conn:
         return int(
             conn.execute(
@@ -167,6 +235,29 @@ def count_pending_themes(*, window_key: str = "7d", now: datetime | None = None)
                 (since_ms,),
             ).fetchone()["n"]
         )
+
+
+def list_attributed_note_ids(
+    *,
+    window_key: str = "365d",
+    now: datetime | None = None,
+) -> list[str]:
+    """All HELPFUL attributed note ids in window (for maintenance reclassif)."""
+    window_key = _classify_window_key(window_key)
+    since_ms = 0 if window_key == "all" else _ms_since(WINDOW_DAYS[window_key], now)
+    with db_session() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT n.note_id
+            FROM notes n
+            WHERE n.is_helpful = 1
+              AND n.created_at_ms >= ?
+              AND {_attributed_clause()}
+            ORDER BY n.created_at_ms DESC
+            """,
+            (since_ms,),
+        ).fetchall()
+    return [str(r["note_id"]) for r in rows]
 
 
 def _classify_batch(batch: list[dict[str, str]], settings) -> dict[str, str]:
@@ -243,6 +334,8 @@ def classify_pending_notes(
     force: bool = False,
     window_key: str = "7d",
     note_ids: set[str] | None = None,
+    media_ids: set[str] | None = None,
+    politician_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Classify attributed notes in the current 7d window only (weekly moisson)."""
     settings = get_settings()
@@ -258,9 +351,16 @@ def classify_pending_notes(
     limit = limit if limit is not None else settings.theme_max_per_run
     batch_size = batch_size if batch_size is not None else settings.theme_batch_size
     batch_size = max(1, min(batch_size, 40))
+    media_ids = {str(x) for x in media_ids} if media_ids else None
+    politician_ids = {str(x) for x in politician_ids} if politician_ids else None
 
     pending = pending_attributed_notes(
-        limit, force=force, window_key=window_key, note_ids=note_ids
+        limit,
+        force=force,
+        window_key=window_key,
+        note_ids=note_ids,
+        media_ids=media_ids,
+        politician_ids=politician_ids,
     )
     if not pending:
         return {
@@ -272,6 +372,8 @@ def classify_pending_notes(
             "window": window_key,
             "force": force,
             "incremental_note_ids": note_ids is not None,
+            "media_ids": sorted(media_ids) if media_ids else None,
+            "politician_ids": sorted(politician_ids) if politician_ids else None,
         }
 
     # Prefetch tweet texts once per run (fetch mode) — fewer round-trips
@@ -312,6 +414,8 @@ def classify_pending_notes(
         "window": window_key,
         "force": force,
         "incremental_note_ids": note_ids is not None,
+        "media_ids": sorted(media_ids) if media_ids else None,
+        "politician_ids": sorted(politician_ids) if politician_ids else None,
         "errors": errors[:10],
         "radar_themes": list(RADAR_THEMES),
     }
