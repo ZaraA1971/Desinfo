@@ -19,7 +19,7 @@ Source de vérité : `cursor.md` à la racine du projet.
 10. Export public = **PDF seul** ; e-mail watermark + stocké (consent) ; CSV admin hebdo `data/exports_emails_*.csv` ; proxy Next + HMAC ; rate-limit.
 11. API : docs off en prod ; rate-limit ; headers sécu ; `/api/export` via Next uniquement.
 12. Moisson **hebdo lundi 06:00 UTC** (`desinfo-x-sync.timer` → `run_weekly.py`) : CN + X **counts/recent** (1 req/@handle) + cascade + score ; timeline interdite ; thèmes = cache_only par défaut.
-13. Signets UI : **Médias** | **Candidats 2027** (`?kind=`) ; roster candidats = déclarés seulement (`politicians_roster.yml`) ; défaut fenêtre = `7d` pour les deux.
+13. Signets UI : **Médias** | **Candidats 2027** | **Demandes des États** (`?kind=`) ; roster candidats = déclarés seulement (`politicians_roster.yml`) ; défaut fenêtre = `7d` pour médias/candidats. Demandes des États = snapshot `latest_gov.json` depuis le code public X (pas d’API X).
 14. Snapshots = `latest_*.json` atomiques seulement ; meta `next_x_sync_at` pour la prochaine moisson.
 15. Radar : thèmes LLM en fin de moisson hebdo ; agrégation médias **et** candidats (`build_politician_radar_profiles`).
 16. **Incrémental partout** : CN = dumps post-`last_dump_date` ; attribution = notes touchées ; thèmes = backlog 7j non classifiées (priorité notes ingest) ; X = skip @handle si sync < `DESINFO_X_SYNC_MIN_AGE_HOURS` ; fenêtres longues = cascade SQLite seule.

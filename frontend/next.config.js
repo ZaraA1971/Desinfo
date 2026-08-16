@@ -14,6 +14,10 @@ const nextConfig = {
         destination: `http://${host}:${port}/api/ranking`,
       },
       {
+        source: "/api/gov",
+        destination: `http://${host}:${port}/api/gov`,
+      },
+      {
         source: "/health",
         destination: `http://${host}:${port}/health`,
       },

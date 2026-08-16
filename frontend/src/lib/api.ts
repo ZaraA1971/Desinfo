@@ -1,4 +1,5 @@
 export type RankingKind = "media" | "politicians";
+export type PageKind = RankingKind | "gov";
 
 export type RadarAxis = {
   theme: string;
@@ -26,6 +27,8 @@ export type RankingItem = {
   party?: string | null;
   domains?: string[];
   x_handle: string | null;
+  /** Comptes X sous la marque (somme posts) ; fallback = [x_handle] */
+  x_handles?: string[] | null;
   cn_count: number;
   post_count: number | null;
   rate_cn_per_post: number | null;
@@ -64,6 +67,42 @@ export type MetaResponse = {
   last_snapshot_at: string | null;
   metric_mode: MetricMode | string;
   kinds?: RankingKind[];
+  gov_measure_count?: number;
+  gov_account_count?: number;
+  last_gov_sync_at?: string | null;
+};
+
+export type GovAccount = {
+  handle: string;
+  user_id: string;
+};
+
+export type GovMeasure = {
+  id: string;
+  country_code?: string;
+  country: string;
+  authority?: string;
+  title: string;
+  effect: string;
+  effect_code?: string;
+  legal_basis?: string;
+  announced_at?: string | null;
+  source_path?: string;
+  source_url?: string;
+  account_count: number;
+  discovered?: boolean;
+  accounts: GovAccount[];
+};
+
+export type GovSnapshot = {
+  kind?: string;
+  generated_at: string;
+  source_repo?: string;
+  disclaimer?: string;
+  measure_count: number;
+  account_count: number;
+  discovered_files?: string[];
+  measures: GovMeasure[];
 };
 
 export type WindowStatus = {
@@ -93,6 +132,14 @@ export async function fetchRanking(
   const res = await fetch(`/api/ranking?${q}`, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`Ranking unavailable (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function fetchGov(): Promise<GovSnapshot> {
+  const res = await fetch("/api/gov", { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Demandes des États indisponibles (${res.status})`);
   }
   return res.json();
 }

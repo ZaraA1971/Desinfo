@@ -60,6 +60,11 @@ def main() -> int:
         help="Max notes to classify this run (default DESINFO_THEME_MAX_PER_RUN)",
     )
     parser.add_argument("--skip-score", action="store_true")
+    parser.add_argument(
+        "--skip-gov",
+        action="store_true",
+        help="Skip X public-code harvest of government measures",
+    )
     parser.add_argument("--skip-emails", action="store_true")
     parser.add_argument("--windows", nargs="*", default=None)
     args = parser.parse_args()
@@ -122,6 +127,11 @@ def main() -> int:
 
         csv_res = write_emails_csv()
         print("emails_csv:", csv_res)
+
+    if not args.skip_gov:
+        from backend.gov.sync import sync_gov_measures
+
+        print("gov:", sync_gov_measures())
 
     return 0
 

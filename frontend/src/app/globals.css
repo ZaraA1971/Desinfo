@@ -549,6 +549,56 @@ footer .transparency {
   color: var(--muted);
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.gov-meta {
+  margin: 1.25rem 0 1rem;
+}
+
+.gov-detail p {
+  margin: 0 0 0.65rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.gov-search input {
+  font: inherit;
+  width: min(18rem, 100%);
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+}
+
+.gov-accounts-meta {
+  margin: 0.5rem 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.gov-handle-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+}
+
+.gov-handle-list a {
+  font-size: 0.92rem;
+}
+
 @media (max-width: 640px) {
   .shell {
     padding-top: 1.5rem;

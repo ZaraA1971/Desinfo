@@ -30,6 +30,8 @@ Référence **canonique** pour plans et implémentation. Domaine public : `desin
 | `backend/x_client/` | Client API X (timelines, counts) |
 | `config/media_domains.yml` | Seed domaines FR → média |
 | `config/media_roster.yml` | Starter set souverain (issu du bootstrap 365 j) |
+| `backend/gov/` | Demandes des États : lecture du code public X (`x-algorithm`) |
+| `config/gov_measures.yml` | Mesures déjà identifiées (Brésil 2026, etc.) |
 | `frontend/` | Next.js App Router — palmarès public |
 | `infra/systemd/` | Units API, frontend, ingest timer |
 | `deploy/nginx/` | Vhost TLS `desinfo.electronlibre.info` |
@@ -349,6 +351,12 @@ Contrôle : `GET /api/ranking?window=7d&kind=politicians`.
 - Helper `backend/db.py` : `chunked` / `execute_by_ids` / `fetchall_by_ids` (`SQLITE_IN_CHUNK=500`) pour attribution médias/candidats et scope thèmes.
 - Échec d’attribution **après** commit par jour : les dumps sont déjà en base (`last_dump_date` avancé) — relancer un backfill `attribute_notes()` / `attribute_politicians()` (notes sans lien) puis moisson thèmes/X/score.
 
+## CookieYes + analytics
+
+- **CookieYes** : même compte / clé qu’ElectronLibre (`EL_COOKIEYES_WEBSITE_KEY` ou `NEXT_PUBLIC_COOKIEYES_WEBSITE_KEY`) — composant `frontend/src/components/CookieYes.tsx`, chargé `beforeInteractive` **avant** GoatCounter.
+- Domaine à autoriser dans le dashboard CookieYes : `desinfo.electronlibre.info` (sinon bannière absente / scripts non gérés).
+- **GoatCounter** : même site `electronlibre.goatcounter.com`, path préfixé par host (`frontend/src/components/GoatCounter.tsx`).
+
 ## Open source
 
 - Dépôt public : [github.com/ZaraA1971/Desinfo](https://github.com/ZaraA1971/Desinfo)
@@ -382,7 +390,8 @@ pipelines d'attribution indépendants (aucun ne touche les tables de l'autre) :
 - `backend/ingest/pipeline.py` : `attribute_politicians(conn)` appelé juste après `attribute_notes(conn)` (même transaction) ; résultat inclut `note_politician_links`.
 - `backend/x_client/sync.py` : `sync_politicians_post_counts()` + `cascade_politician_windows()` miroir médias ; `run_weekly_harvest()` enchaîne médias puis politiques.
 - `scripts/run_weekly.py` : pipeline hebdo (CN → thèmes → X → cascade → score). `ingest_daily.py` = CN seul (manuel).
-- **UI** : onglets Médias | Candidats 2027 ; `GET /api/ranking?kind=politicians&window=` ; défaut fenêtre = **7d** (même logique que médias).
+- **UI** : onglets Médias | Candidats 2027 | Demandes des États ; `GET /api/ranking?kind=politicians&window=` ; défaut fenêtre = **7d** (même logique que médias).
+- **Demandes des États** : `GET /api/gov` lit `data/snapshots/latest_gov.json`. Source = fichiers publics `xai-org/x-algorithm` (pas d’API X). Catalogue `config/gov_measures.yml` + découverte des nouveaux `*_election_filter.rs`. Moisson dans `run_weekly.py` / `scripts/sync_gov.py`. L’UI **observe** le snapshot. Ce n’est **pas** un inventaire des posts retirés.
 - Attribution CN candidats = texte/@handles uniquement (pas de lookup tweet).
 
 ## Ingest CN (détails)

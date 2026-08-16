@@ -1,6 +1,6 @@
 # Desinfo — Observatoire de la désinformation
 
-Palmarès roulant des médias (et candidats 2027) basé sur les [Community Notes](https://communitynotes.x.com/) de X : densité de notes HELPFUL par rapport à l’activité de publication.
+Palmarès roulant des médias (et candidats 2027) basé sur les [Community Notes](https://communitynotes.x.com/) de X : densité de notes HELPFUL par rapport à l’activité de publication. Signet **Demandes des États** : mesures visibles dans le [code public de X](https://github.com/xai-org/x-algorithm#latest-updates) (pas un inventaire des posts retirés).
 
 - **Site** : [desinfo.electronlibre.info](https://desinfo.electronlibre.info)
 - **Licence** : [AGPL-3.0](LICENSE)
