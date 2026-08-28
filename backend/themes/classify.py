@@ -22,32 +22,44 @@ Pour chaque item tu reçois le POST (tweet original) et la NOTE (correction Comm
 Thèmes autorisés (ids exacts uniquement) :
 {", ".join(ALL_THEMES)}
 
+Critère unique (médias et personnalités) :
+classe uniquement le sujet du fait corrigé. Qui parle (média, élu, parti, @handle) ne change jamais le thème. Une note sur un élu se classe exactement comme si le même fait venait d’un média.
+
 Méthode (dans cet ordre) :
 1) Quelle est l’affirmation trompeuse du POST ?
 2) Que corrige réellement la NOTE — le cœur de la rectification ?
-3) Choisis le thème de ce cœur, pas le décor (lieu, événement, marque, sport, etc. mentionnés en arrière-plan).
-Ne te fie pas au média cité ni à la langue. Si le post est absent, classe à partir de la note seule.
+3) Choisis le thème de ce cœur, pas le décor (lieu, événement, marque, sport, personnalité citée, etc.).
+Ne te fie pas au média cité, au compte auteur, ni à la langue. Si le post est absent, classe à partir de la note seule.
+
+Règle anti-biais (critique) :
+- La présence d’un·e politicien·ne, d’un parti ou d’un @handle politique N’EST PAS un motif pour choisir « politique ».
+- Classe selon la substance du fait corrigé. Un élu qui parle du nucléaire, de l’Ukraine, d’un fake IA ou d’un prix → science / international / technologie / economie selon le cœur.
+- « politique » seulement si le cœur est vraiment institutionnel/partisan : élections, mandats, carrière, votes au Parlement comme acte partisan, sondages d’intentions, appartenance/parti.
 
 Définitions (par nature du sujet corrigé) :
-- politique : vie politique (surtout FR) — partis, élections, gouvernement, parlement, personnalités politiques, sondages, discours partisans. Un politicien FR/UE comme sujet principal → politique, même si le propos porte sur l’étranger.
+- politique : élections, mandats, partis, gouvernement/parlement comme institutions, carrière politique, sondages d’intentions, discours purement partisans. PAS le simple fait qu’un élu soit cité. PAS une polémique de personne si un autre sujet factuel existe (Cuba, fake visuel, affaire judiciaire, compte X, etc.).
 - sante : santé publique, médecine, vaccins, hôpitaux, épidémies, médicaments. Pas un fait divers avec blessé si le cœur n’est pas médical.
-- economie : entreprises, marchés, finance, inflation, budget, emploi, commerce.
+- economie : entreprises, marchés, finance, inflation, budget chiffré, emploi, commerce, subventions, coûts.
 - justice : procédures judiciaires, tribunaux, peines, enquêtes formelles, procès. Crime isolé sans angle judiciaire → faits_divers.
-- international : géopolitique, guerres, diplomatie, États, conflits — sans que le cœur soit une polémique partisane FR.
-- science : recherche, climat/environnement scientifique, espace, études. Pseudo-science → science.
-- technologie : nature technique ou numérique de la tromperie ou du sujet (fabrication synthétique, plateformes, cybersécurité, bugs, robots, etc.). Si le décor est géopolitique mais que la note porte sur l’artefact technique → technologie.
-- faits_divers : accidents, incendies, crimes isolés, divertissement/sport comme sujet principal (pas simple décor), scènes locales trompeuses sans enjeu politique/international.
-- autre : meta-média, humour sans enjeu, ou vraiment hors des axes — seulement si aucun autre thème ne décrit le cœur de la correction.
+- international : géopolitique, guerres, diplomatie, États, conflits, OTAN, Ukraine/Russie/Moyen-Orient — même si un politicien FR commente.
+- science : recherche, climat/environnement scientifique, énergie nucléaire comme fait scientifique/technique, espace, études. Pseudo-science → science.
+- technologie : média fabriqué / synthétique / IA, plateformes, cybersécurité, bugs, robots. Si la note porte sur l’artefact technique → technologie (même si un politicien apparaît sur l’image).
+- faits_divers : accidents, incendies, crimes isolés, people/divertissement/sport comme sujet principal, scènes locales trompeuses.
+- autre : meta-média, humour sans enjeu, ou vraiment hors des axes — seulement en dernier recours.
 
 Ambiguïté : préférer le thème le plus spécifique au cœur de la correction ; autre en dernier recours.
-Si un élément du décor entre en conflit avec le cœur, le cœur gagne toujours.
+Si un élément du décor (y compris un politicien) entre en conflit avec le cœur, le cœur gagne toujours.
 
 Exemples de raisonnement :
-- Personnalité politique FR + propos sur l’étranger → politique (cœur = l’acteur politique)
-- Conflit / État au centre de la tromperie → international
-- Note qui établit surtout qu’un média est fabriqué / synthétique / truqué techniquement → technologie (même si le décor est un stade, une guerre ou un animal)
+- Élu FR qui commente l’Ukraine / la Crimée / l’OTAN → international (cœur = géopolitique)
+- Élu FR + affirmation sur le nucléaire, le climat, les canicules → science
+- Note qui établit surtout qu’un média est fabriqué / synthétique / truqué / pastiche → technologie (même si un politicien est sur l’image)
+- Correction sur un coût, une subvention, un chiffre économique → economie
+- Mandats cumulés, parachutage, sondage présidentiel, vote de parti → politique
+- Condamnation / peine / tribunal / mise en examen / affaire judiciaire → justice
+- Bilan d’un régime étranger (Castro, Cuba, droits humains) même cité par un élu FR → international
+- Compte X toujours actif / visuel satirique / pastiche d’antenne → technologie
 - Incendie local présenté à tort comme une attaque militaire → international si la tromperie porte sur le conflit ; faits_divers si le cœur est juste la mauvaise scène locale
-- Contrats tech + conflit géopolitique au centre → international
 
 Réponds UNIQUEMENT un JSON array valide :
 [{{"id":"<note_id>","theme":"<id>"}}]

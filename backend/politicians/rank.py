@@ -16,7 +16,7 @@ from typing import Any
 from backend.config import get_settings
 from backend.db import db_session, get_meta, set_meta
 from backend.politicians.config import load_politicians_roster
-from backend.scoring.rank import WINDOW_DAYS, _ms_since, parse_window
+from backend.scoring.rank import WINDOW_DAYS, _ms_since, parse_window, window_as_of
 from backend.themes.radar import build_politician_radar_profiles
 
 log = logging.getLogger("desinfo.politicians.scoring")
@@ -26,8 +26,9 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
     settings = get_settings()
     window_key = (window_key or settings.default_window).strip().lower()
     days = parse_window(window_key)
-    now = now or datetime.now(timezone.utc)
-    since_ms = _ms_since(days, now)
+    generated_at = now or datetime.now(timezone.utc)
+    as_of = window_as_of(window_key, generated_at)
+    since_ms = _ms_since(days, as_of)
 
     roster = load_politicians_roster()
     candidates = roster.get("candidates") or []
@@ -97,7 +98,7 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
 
         last_ingest = get_meta(conn, "last_ingest_at")
         radar_by_politician = build_politician_radar_profiles(
-            conn, politician_ids=roster_ids, window_key=window_key, now=now
+            conn, politician_ids=roster_ids, window_key=window_key, now=as_of
         )
 
     metric_mode = "post_cn" if any_posts else "cn_only"
@@ -157,9 +158,10 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
 
     snapshot = {
         "kind": "politicians",
-        "generated_at": now.isoformat(),
+        "generated_at": generated_at.isoformat(),
         "window": window_key,
         "window_days": days,
+        "cn_as_of": as_of.isoformat(),
         "metric_mode": metric_mode,
         "last_ingest_at": last_ingest,
         "roster_size": len(roster_ids),

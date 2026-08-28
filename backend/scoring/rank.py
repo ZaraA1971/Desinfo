@@ -9,7 +9,7 @@ from typing import Any
 
 from backend.config import get_settings
 from backend.db import db_session, get_meta, set_meta
-from backend.media_config import load_media_roster
+from backend.media_config import iter_x_handles, load_media_roster, primary_x_handle
 from backend.themes.radar import build_radar_profiles
 
 log = logging.getLogger("desinfo.scoring")
@@ -30,12 +30,54 @@ def _ms_since(days: int, now: datetime | None = None) -> int:
     return int(start.timestamp() * 1000)
 
 
+def _parse_iso_dt(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def last_weekly_as_of(now: datetime | None = None) -> datetime:
+    """End of the 7d CN cycle: last weekly ingest, else last Monday 06:00 UTC."""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
+    ingested = None
+    with db_session() as conn:
+        ingested = _parse_iso_dt(get_meta(conn, "last_ingest_at"))
+    if ingested is not None and ingested <= now:
+        return ingested
+    days_back = now.weekday()
+    candidate = now.replace(hour=6, minute=0, second=0, microsecond=0) - timedelta(
+        days=days_back
+    )
+    if candidate > now:
+        candidate -= timedelta(days=7)
+    return candidate
+
+
+def window_as_of(window_key: str, now: datetime | None = None) -> datetime:
+    """7d stays on last Monday harvest until the next one; longer windows roll."""
+    now = now or datetime.now(timezone.utc)
+    if window_key.strip().lower() == "7d":
+        return last_weekly_as_of(now)
+    return now
+
+
 def compute_ranking(window_key: str | None = None, *, now: datetime | None = None) -> dict[str, Any]:
     settings = get_settings()
     window_key = (window_key or settings.default_window).strip().lower()
     days = parse_window(window_key)
-    now = now or datetime.now(timezone.utc)
-    since_ms = _ms_since(days, now)
+    generated_at = now or datetime.now(timezone.utc)
+    as_of = window_as_of(window_key, generated_at)
+    since_ms = _ms_since(days, as_of)
 
     roster = load_media_roster()
     roster_media = roster.get("media") or []
@@ -68,7 +110,8 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
                     "id": mid,
                     "name": m.get("name", mid),
                     "domains": ",".join(m.get("domains") or []),
-                    "x_handle": m.get("x_handle"),
+                    "x_handle": primary_x_handle(m),
+                    "x_handles": iter_x_handles(m),
                 }
 
         counts: dict[str, int] = {mid: 0 for mid in roster_ids}
@@ -106,7 +149,7 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
 
         last_ingest = get_meta(conn, "last_ingest_at")
         radar_by_media = build_radar_profiles(
-            conn, media_ids=roster_ids, window_key=window_key, now=now
+            conn, media_ids=roster_ids, window_key=window_key, now=as_of
         )
 
     metric_mode = "post_cn" if any_posts else "cn_only"
@@ -128,12 +171,17 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
             rate = None
             ratio_post_cn = None
 
+        roster_m = roster_by_id.get(mid) or {}
+        handles = iter_x_handles(roster_m) or (
+            [meta["x_handle"]] if meta.get("x_handle") else []
+        )
         entries.append(
             {
                 "media_id": mid,
                 "name": meta.get("name") or mid,
                 "domains": (meta.get("domains") or "").split(",") if isinstance(meta.get("domains"), str) else meta.get("domains") or [],
-                "x_handle": meta.get("x_handle"),
+                "x_handle": primary_x_handle(roster_m) or meta.get("x_handle"),
+                "x_handles": handles or None,
                 "cn_count": cn,
                 "post_count": posts,
                 "rate_cn_per_post": rate,
@@ -165,9 +213,10 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
             e["delta_rank"] = prev - e["rank"]
 
     snapshot = {
-        "generated_at": now.isoformat(),
+        "generated_at": generated_at.isoformat(),
         "window": window_key,
         "window_days": days,
+        "cn_as_of": as_of.isoformat(),
         "metric_mode": metric_mode,
         "last_ingest_at": last_ingest,
         "roster_size": len(roster_ids),

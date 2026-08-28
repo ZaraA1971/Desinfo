@@ -23,5 +23,5 @@ Source de vérité : `cursor.md` à la racine du projet.
 14. Snapshots = `latest_*.json` atomiques seulement ; meta `next_x_sync_at` pour la prochaine moisson.
 15. Radar : thèmes LLM en fin de moisson hebdo ; agrégation médias **et** candidats (`build_politician_radar_profiles`).
 16. **Incrémental partout** : CN = dumps post-`last_dump_date` ; attribution = notes touchées ; thèmes = backlog 7j non classifiées (priorité notes ingest) ; X = skip @handle si sync < `DESINFO_X_SYNC_MIN_AGE_HOURS` ; fenêtres longues = cascade SQLite seule.
-17. **Métrique live = 7d** (CN + posts). `30d`/`90d`/`365d` = cascade posts (`*_posts_daily`) + CN glissants — jamais d’API X longue. `cn_365d` du roster = bootstrap, pas le score UI.
+17. **Métrique live = 7d** (CN + posts). CN `7d` figée à `last_ingest_at` jusqu’au lundi suivant. `30d`/`90d`/`365d` = cascade posts (`*_posts_daily`) + CN glissants — jamais d’API X longue. `cn_365d` du roster = bootstrap, pas le score UI.
 18. **Ajouter un compte** : procédure dans `cursor.md` § « Procédure — ajouter des comptes ». Médias = `media_domains.yml` + `media_roster.yml` ; candidats = `politicians_roster.yml`. Pas de `--bootstrap` après ajout manuel. Multi-comptes X sous une marque : `x_handles: [A, B]` (somme des posts 7d).
