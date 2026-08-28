@@ -11,7 +11,7 @@ from backend.config import get_settings
 from backend.db import db_session, set_meta
 from backend.media_config import load_media_roster
 from backend.politicians.config import load_politicians_roster
-from backend.scoring.rank import WINDOW_DAYS
+from backend.scoring.rank import WINDOW_DAYS, last_weekly_as_of
 from backend.x_client.client import XApiError, _client, fetch_recent_daily_counts
 
 log = logging.getLogger("desinfo.x_sync")
@@ -374,7 +374,7 @@ def cascade_longer_windows(*, now: datetime | None = None) -> dict[str, Any]:
     Only writes a window when day coverage in that range >= DESINFO_CASCADE_COVERAGE.
     """
     settings = get_settings()
-    now = now or datetime.now(timezone.utc)
+    now = now or last_weekly_as_of()
     coverage_need = max(0.1, min(1.0, settings.cascade_coverage))
     targets = [w for w in settings.cascade_windows if w in WINDOW_DAYS and w != "7d"]
     if not targets:
@@ -586,7 +586,7 @@ def cascade_politician_windows(*, now: datetime | None = None) -> dict[str, Any]
     zero X API cost. Mirrors cascade_longer_windows() (media).
     """
     settings = get_settings()
-    now = now or datetime.now(timezone.utc)
+    now = now or last_weekly_as_of()
     coverage_need = max(0.1, min(1.0, settings.cascade_coverage))
     targets = [w for w in settings.cascade_windows if w in WINDOW_DAYS and w != "7d"]
     if not targets:

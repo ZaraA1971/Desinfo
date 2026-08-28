@@ -8,7 +8,7 @@ from backend.config import get_settings
 from backend.db import db_session
 from backend.media_config import load_media_roster
 from backend.politicians.config import load_politicians_roster
-from backend.scoring.rank import WINDOW_DAYS
+from backend.scoring.rank import WINDOW_DAYS, last_weekly_as_of
 
 
 def _roster_size(kind: str) -> int:
@@ -25,7 +25,7 @@ def compute_windows_status(*, kind: str = "media", now: datetime | None = None) 
     - progress: share of roster with enough daily buckets (0–1)
     """
     settings = get_settings()
-    now = now or datetime.now(timezone.utc)
+    now = now or last_weekly_as_of()
     coverage_need = max(0.1, min(1.0, settings.cascade_coverage))
     roster_size = _roster_size(kind)
     if roster_size <= 0:

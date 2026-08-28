@@ -43,7 +43,10 @@ def _parse_iso_dt(raw: str | None) -> datetime | None:
 
 
 def last_weekly_as_of(now: datetime | None = None) -> datetime:
-    """End of the 7d CN cycle: last weekly ingest, else last Monday 06:00 UTC."""
+    """As-of date of the last weekly harvest (ingest), else last Monday 06:00 UTC.
+
+    7d is replaced by that harvest. 30/90/365 accumulate from the same date.
+    """
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
@@ -64,11 +67,8 @@ def last_weekly_as_of(now: datetime | None = None) -> datetime:
 
 
 def window_as_of(window_key: str, now: datetime | None = None) -> datetime:
-    """7d stays on last Monday harvest until the next one; longer windows roll."""
-    now = now or datetime.now(timezone.utc)
-    if window_key.strip().lower() == "7d":
-        return last_weekly_as_of(now)
-    return now
+    """Every ranking window is cut at the last harvest, not at wall-clock now."""
+    return last_weekly_as_of(now)
 
 
 def compute_ranking(window_key: str | None = None, *, now: datetime | None = None) -> dict[str, Any]:
