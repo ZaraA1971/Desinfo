@@ -45,6 +45,9 @@ class Settings:
             "DESINFO_CN_BASE_URL",
             "https://ton.twimg.com/birdwatch-public-data",
         )
+        # First / full ingest: how far back to search for a published dump.
+        # Incremental runs scan last_dump_date → today and do not use this cap.
+        self.cn_dump_lookback_days: int = int(os.environ.get("DESINFO_CN_LOOKBACK_DAYS", "21"))
 
         self.x_bearer_token: str | None = os.environ.get("X_BEARER_TOKEN") or None
         self.export_max_per_hour: int = int(os.environ.get("DESINFO_EXPORT_MAX_PER_HOUR", "5"))

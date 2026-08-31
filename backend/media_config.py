@@ -40,6 +40,32 @@ def save_media_roster(roster: dict[str, Any], path: Path | None = None) -> None:
     tmp.replace(p)
 
 
+def _normalize_x_handle(raw: Any) -> str | None:
+    h = str(raw or "").lstrip("@").strip()
+    return h or None
+
+
+def iter_x_handles(media: dict[str, Any]) -> list[str]:
+    """Return normalized X handles for a media/roster entry (x_handles or x_handle)."""
+    handles = media.get("x_handles")
+    if handles:
+        out: list[str] = []
+        for raw in handles:
+            h = _normalize_x_handle(raw)
+            if h:
+                out.append(h)
+        if out:
+            return out
+    h = _normalize_x_handle(media.get("x_handle"))
+    return [h] if h else []
+
+
+def primary_x_handle(media: dict[str, Any]) -> str | None:
+    """Primary handle for DB/UI (first of x_handles, else x_handle)."""
+    handles = iter_x_handles(media)
+    return handles[0] if handles else None
+
+
 def build_domain_index(media_list: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Map lowercase domain → media dict (longest domain wins on ties via explicit order)."""
     index: dict[str, dict[str, Any]] = {}

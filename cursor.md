@@ -396,9 +396,8 @@ pipelines d'attribution indépendants (aucun ne touche les tables de l'autre) :
 
 ## Ingest CN (détails)
 
-- **Incrémental** : seuls les dumps **postérieurs** à `last_dump_date` (meta) sont téléchargés/parsés ; skip si déjà à jour. Legacy : `last_dump_date` initialisé depuis `dump_date` au 1er run.
+- **Incrémental** : scan de chaque jour **après** `last_dump_date` jusqu’à aujourd’hui. Jours absents ou incomplets = skip. Rien de nouveau = ingest `skipped`, la moisson X / score continue. 1ère moisson : dernier dump prêt dans `DESINFO_CN_LOOKBACK_DAYS` (21). Legacy : `last_dump_date` depuis `dump_date`.
 - Un jour n’est « prêt » que si `notes-00000.zip` **et** `noteStatusHistory-00000.zip` sont publiés (sinon skip — au petit matin UTC le status peut manquer encore). Commit **par jour** pour ne pas perdre les dumps déjà OK.
-- 1ère moisson : dernier dump disponible ; ensuite +1 dump/jour max par semaine (rattrapage si retard).
 - Attribution médias/candidats : **notes touchées uniquement** (rebuild complet si hash roster change).
 - Thèmes LLM : **7j courants**, notes sans `note_theme` ; après ingest, filtre sur `touched_note_ids` quand disponible.
 - Moisson X : **1 req/@handle/semaine** (`counts/recent`) ; skip si `synced_at` récent ; 30/90/365 = cascade `*_posts_daily` (zéro API).
