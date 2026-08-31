@@ -14,7 +14,7 @@ Référence **canonique** pour plans et implémentation. Domaine public : `desin
 5. **Pipeline souverain** — Ordre fixe : `download → parse → attribute → score → snapshot → API → UI`.
 6. **Config centralisée** — `.env` + `config/*.yml` ; pas de magic numbers dispersés.
 7. **Notes comptées** — Uniquement statut `CURRENTLY_RATED_HELPFUL` (via `noteStatusHistory`).
-8. **Métrique** — Principale : `CN / posts` (`rate_cn_per_post`, plus haut = plus densément noté). Secondaire : `posts / CN`. Sans API X : `metric_mode=cn_only`. **Fenêtre opérationnelle = `7d`** = **données de la moisson** (remplacées chaque lundi). `30d` / `90d` / `365d` = **accumulation** des moissons (cascade posts `*_posts_daily` + CN coupés à `last_ingest_at`) — jamais de sync X longue.
+8. **Métrique** — Principale : `CN / posts` (`rate_cn_per_post`, plus haut = plus densément noté). Secondaire : `posts / CN`. Sans API X : `metric_mode=cn_only`. **Fenêtre opérationnelle = `7d`** = **lundi 06:00 UTC → lundi 06:00 UTC** (même heure que le timer). `30d` / `90d` / `365d` = **accumulation** des moissons (cascade posts `*_posts_daily` + CN coupés au même lundi 06:00) — jamais de sync X longue.
 9. **Attribution V1** — Domaines dans le texte des notes → `config/media_domains.yml` → média. Pas de lookup tweet sans API.
 10. **Formules métier** — Une seule implémentation dans `backend/scoring/`.
 11. **Diagnostics** — Logs journald / `data/` ; flag `DESINFO_DEBUG=1` pour verbosité.
@@ -135,7 +135,7 @@ Variables :
 - Stocke les buckets jour dans `media_posts_daily` + fenêtre `7d`.
 - **Cascade** (0 crédit) : somme des jours → `30d` / `90d` / `365d` dès que couverture ≥ `DESINFO_CASCADE_COVERAGE` (défaut 0.7). Remplissage **semaine par semaine** (1 moisson 7j = ~7 buckets/jour/compte).
 - UI : fenêtres 30/90/365 **grisées et non cliquables** tant que `windows_status[w].available` est false (`/api/meta`).
-- CN + posts : tout est coupé à la **dernière moisson** (`last_ingest_at`). `7d` = cette moisson (on remplace). `30d`/`90d`/`365d` = accumulation des semaines. Un rescore en semaine ne glisse pas les fenêtres. Pas d’ingest quotidien. **Toujours parler CN sur la fenêtre demandée** (prod = `7d`) ; ne pas citer `cn_365d` du roster comme métrique live.
+- Moisson = **lundi 06:00 UTC** (pas l’heure réelle du job). `7d` = la semaine lundi→lundi qui vient de se terminer. Si ce créneau n’a pas encore de notes, on compte la **semaine passée** ; la date de moisson reste aujourd’hui. `30d`/`90d`/`365d` = accumulation coupée au même lundi 06:00. Un rescore en semaine ne glisse pas. Pas d’ingest quotidien. **Toujours parler CN sur la fenêtre demandée** (prod = `7d`) ; ne pas citer `cn_365d` du roster comme métrique live.
 
 ## Procédure — ajouter des comptes
 

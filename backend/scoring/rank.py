@@ -24,50 +24,74 @@ def parse_window(window_key: str) -> int:
     return WINDOW_DAYS[key]
 
 
-def _ms_since(days: int, now: datetime | None = None) -> int:
+def _utc(now: datetime | None = None) -> datetime:
     now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=timezone.utc)
+    return now.astimezone(timezone.utc)
+
+
+def _ms_since(days: int, now: datetime | None = None) -> int:
+    now = _utc(now)
     start = now - timedelta(days=days)
     return int(start.timestamp() * 1000)
 
 
-def _parse_iso_dt(raw: str | None) -> datetime | None:
-    if not raw:
-        return None
-    try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+def window_ms_bounds(days: int, as_of: datetime) -> tuple[int, int]:
+    """Half-open window [as_of - days, as_of)."""
+    as_of = _utc(as_of)
+    until_ms = int(as_of.timestamp() * 1000)
+    since_ms = int((as_of - timedelta(days=days)).timestamp() * 1000)
+    return since_ms, until_ms
+
+
+def harvest_monday_utc(now: datetime | None = None) -> datetime:
+    """Monday 06:00 UTC on or before now — same instant every week."""
+    settings = get_settings()
+    now = _utc(now)
+    hour = max(0, min(23, int(settings.harvest_hour_utc)))
+    cut = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    cut -= timedelta(days=now.weekday())
+    if cut > now:
+        cut -= timedelta(days=7)
+    return cut
 
 
 def last_weekly_as_of(now: datetime | None = None) -> datetime:
-    """As-of date of the last weekly harvest (ingest), else last Monday 06:00 UTC.
+    """This week's harvest cut: Monday 06:00 UTC, not the job start time."""
+    return harvest_monday_utc(now)
 
-    7d is replaced by that harvest. 30/90/365 accumulate from the same date.
+
+def cn_window_bounds(days: int, harvest_as_of: datetime) -> tuple[int, int]:
+    """CN window for a harvest.
+
+    7d = the Monday–Monday week that just ended. If that slot has no notes
+    yet (dumps lag), count the previous week — the harvest date stays today.
+    Longer windows end at the harvest cut.
     """
-    now = now or datetime.now(timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    else:
-        now = now.astimezone(timezone.utc)
-    ingested = None
+    harvest_as_of = _utc(harvest_as_of)
+    if days != 7:
+        return window_ms_bounds(days, harvest_as_of)
+    cut = harvest_as_of
     with db_session() as conn:
-        ingested = _parse_iso_dt(get_meta(conn, "last_ingest_at"))
-    if ingested is not None and ingested <= now:
-        return ingested
-    days_back = now.weekday()
-    candidate = now.replace(hour=6, minute=0, second=0, microsecond=0) - timedelta(
-        days=days_back
-    )
-    if candidate > now:
-        candidate -= timedelta(days=7)
-    return candidate
+        for _ in range(12):
+            since_ms, until_ms = window_ms_bounds(7, cut)
+            row = conn.execute(
+                """
+                SELECT 1 FROM notes
+                WHERE is_helpful=1 AND created_at_ms >= ? AND created_at_ms < ?
+                LIMIT 1
+                """,
+                (since_ms, until_ms),
+            ).fetchone()
+            if row:
+                return since_ms, until_ms
+            cut -= timedelta(days=7)
+    return window_ms_bounds(7, harvest_as_of)
 
 
 def window_as_of(window_key: str, now: datetime | None = None) -> datetime:
-    """Every ranking window is cut at the last harvest, not at wall-clock now."""
+    """Every ranking window is cut at this week's Monday 06:00 harvest."""
     return last_weekly_as_of(now)
 
 
@@ -77,7 +101,8 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
     days = parse_window(window_key)
     generated_at = now or datetime.now(timezone.utc)
     as_of = window_as_of(window_key, generated_at)
-    since_ms = _ms_since(days, as_of)
+    since_ms, until_ms = cn_window_bounds(days, as_of)
+    radar_as_of = datetime.fromtimestamp(until_ms / 1000, tz=timezone.utc)
 
     roster = load_media_roster()
     roster_media = roster.get("media") or []
@@ -121,11 +146,12 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
                 SELECT nm.media_id, COUNT(DISTINCT nm.note_id) AS cn
                 FROM note_media nm
                 JOIN notes n ON n.note_id = nm.note_id
-                WHERE n.is_helpful=1 AND n.created_at_ms >= ?
+                WHERE n.is_helpful=1
+                  AND n.created_at_ms >= ? AND n.created_at_ms < ?
                   AND nm.media_id IN ({placeholders})
                 GROUP BY nm.media_id
             """
-            rows = conn.execute(q, [since_ms, *roster_ids]).fetchall()
+            rows = conn.execute(q, [since_ms, until_ms, *roster_ids]).fetchall()
             for r in rows:
                 counts[r["media_id"]] = int(r["cn"])
 
@@ -149,7 +175,7 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
 
         last_ingest = get_meta(conn, "last_ingest_at")
         radar_by_media = build_radar_profiles(
-            conn, media_ids=roster_ids, window_key=window_key, now=as_of
+            conn, media_ids=roster_ids, window_key=window_key, now=radar_as_of
         )
 
     metric_mode = "post_cn" if any_posts else "cn_only"

@@ -16,7 +16,7 @@ from typing import Any
 from backend.config import get_settings
 from backend.db import db_session, get_meta, set_meta
 from backend.politicians.config import load_politicians_roster
-from backend.scoring.rank import WINDOW_DAYS, _ms_since, parse_window, window_as_of
+from backend.scoring.rank import WINDOW_DAYS, cn_window_bounds, parse_window, window_as_of
 from backend.themes.radar import build_politician_radar_profiles
 
 log = logging.getLogger("desinfo.politicians.scoring")
@@ -28,7 +28,8 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
     days = parse_window(window_key)
     generated_at = now or datetime.now(timezone.utc)
     as_of = window_as_of(window_key, generated_at)
-    since_ms = _ms_since(days, as_of)
+    since_ms, until_ms = cn_window_bounds(days, as_of)
+    radar_as_of = datetime.fromtimestamp(until_ms / 1000, tz=timezone.utc)
 
     roster = load_politicians_roster()
     candidates = roster.get("candidates") or []
@@ -70,11 +71,12 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
                 SELECT np.politician_id, COUNT(DISTINCT np.note_id) AS cn
                 FROM note_politician np
                 JOIN notes n ON n.note_id = np.note_id
-                WHERE n.is_helpful=1 AND n.created_at_ms >= ?
+                WHERE n.is_helpful=1
+                  AND n.created_at_ms >= ? AND n.created_at_ms < ?
                   AND np.politician_id IN ({placeholders})
                 GROUP BY np.politician_id
             """
-            rows = conn.execute(q, [since_ms, *roster_ids]).fetchall()
+            rows = conn.execute(q, [since_ms, until_ms, *roster_ids]).fetchall()
             for r in rows:
                 counts[r["politician_id"]] = int(r["cn"])
 
@@ -98,7 +100,7 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
 
         last_ingest = get_meta(conn, "last_ingest_at")
         radar_by_politician = build_politician_radar_profiles(
-            conn, politician_ids=roster_ids, window_key=window_key, now=as_of
+            conn, politician_ids=roster_ids, window_key=window_key, now=radar_as_of
         )
 
     metric_mode = "post_cn" if any_posts else "cn_only"

@@ -9,7 +9,7 @@ from typing import Any
 
 from backend.config import get_settings
 from backend.db import SQLITE_IN_CHUNK, chunked, db_session, set_meta
-from backend.scoring.rank import WINDOW_DAYS, _ms_since
+from backend.scoring.rank import WINDOW_DAYS, cn_window_bounds, window_as_of
 from backend.themes.openai_chat import post_chat_completion
 from backend.themes.taxonomy import ALL_THEMES, RADAR_THEMES, normalize_theme
 
@@ -106,6 +106,16 @@ def _classify_window_key(window_key: str | None) -> str:
     return key
 
 
+def _classify_window_filter(
+    window_key: str, now: datetime | None = None
+) -> tuple[str, list[Any]]:
+    if window_key == "all":
+        return "1", []
+    as_of = now or window_as_of(window_key)
+    since_ms, until_ms = cn_window_bounds(WINDOW_DAYS[window_key], as_of)
+    return "n.created_at_ms >= ? AND n.created_at_ms < ?", [since_ms, until_ms]
+
+
 def _scope_filters(
     *,
     note_ids: set[str] | None = None,
@@ -155,7 +165,7 @@ def pending_attributed_notes(
 ) -> list[dict[str, str]]:
     """HELPFUL notes in the classify window (7d) linked to media or politician."""
     window_key = _classify_window_key(window_key)
-    since_ms = 0 if window_key == "all" else _ms_since(WINDOW_DAYS[window_key], now)
+    win_sql, win_params = _classify_window_filter(window_key, now)
     attributed = _attributed_clause()
 
     if note_ids is not None and not note_ids:
@@ -188,13 +198,13 @@ def pending_attributed_notes(
                     SELECT DISTINCT n.note_id, n.summary, n.tweet_id
                     FROM notes n
                     WHERE n.is_helpful = 1
-                      AND n.created_at_ms >= ?
+                      AND {win_sql}
                       AND {attributed}
                       {scope_sql}
                     ORDER BY n.created_at_ms DESC
                     LIMIT ?
                     """,
-                    (since_ms, *scope_params, remain),
+                    (*win_params, *scope_params, remain),
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -203,14 +213,14 @@ def pending_attributed_notes(
                     FROM notes n
                     LEFT JOIN note_theme nt ON nt.note_id = n.note_id
                     WHERE n.is_helpful = 1
-                      AND n.created_at_ms >= ?
+                      AND {win_sql}
                       AND nt.note_id IS NULL
                       AND {attributed}
                       {scope_sql}
                     ORDER BY n.created_at_ms DESC
                     LIMIT ?
                     """,
-                    (since_ms, *scope_params, remain),
+                    (*win_params, *scope_params, remain),
                 ).fetchall()
             for r in rows:
                 nid = r["note_id"]
@@ -231,7 +241,7 @@ def pending_attributed_notes(
 def count_pending_themes(*, window_key: str = "7d", now: datetime | None = None) -> int:
     """Unclassified attributed notes in the classify window (default 7d)."""
     window_key = _classify_window_key(window_key)
-    since_ms = 0 if window_key == "all" else _ms_since(WINDOW_DAYS[window_key], now)
+    win_sql, win_params = _classify_window_filter(window_key, now)
     with db_session() as conn:
         return int(
             conn.execute(
@@ -240,11 +250,11 @@ def count_pending_themes(*, window_key: str = "7d", now: datetime | None = None)
                 FROM notes n
                 LEFT JOIN note_theme nt ON nt.note_id = n.note_id
                 WHERE n.is_helpful = 1
-                  AND n.created_at_ms >= ?
+                  AND {win_sql}
                   AND nt.note_id IS NULL
                   AND {_attributed_clause()}
                 """,
-                (since_ms,),
+                win_params,
             ).fetchone()["n"]
         )
 
@@ -256,18 +266,18 @@ def list_attributed_note_ids(
 ) -> list[str]:
     """All HELPFUL attributed note ids in window (for maintenance reclassif)."""
     window_key = _classify_window_key(window_key)
-    since_ms = 0 if window_key == "all" else _ms_since(WINDOW_DAYS[window_key], now)
+    win_sql, win_params = _classify_window_filter(window_key, now)
     with db_session() as conn:
         rows = conn.execute(
             f"""
             SELECT DISTINCT n.note_id
             FROM notes n
             WHERE n.is_helpful = 1
-              AND n.created_at_ms >= ?
+              AND {win_sql}
               AND {_attributed_clause()}
             ORDER BY n.created_at_ms DESC
             """,
-            (since_ms,),
+            win_params,
         ).fetchall()
     return [str(r["note_id"]) for r in rows]
 
