@@ -67,6 +67,11 @@ def main() -> int:
     )
     parser.add_argument("--skip-emails", action="store_true")
     parser.add_argument("--windows", nargs="*", default=None)
+    parser.add_argument(
+        "--notify-only",
+        action="store_true",
+        help="Send current Desinfo state to Vigie, then exit",
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -74,66 +79,87 @@ def main() -> int:
         level=logging.DEBUG if settings.debug else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+
+    from backend.vigie_notify import brief_emails, brief_gov, brief_harvest, brief_ingest, brief_themes, push_weekly
+
+    if args.notify_only:
+        out = push_weekly({"status": "ok"})
+        print("vigie:", "ok" if out.get("ok") else out)
+        return 0 if out.get("ok") else 1
+
     init_db()
+    run: dict = {"status": "ok", "reason": ""}
 
-    if not args.cascade_only:
-        result = run_ingest(skip_download=args.skip_download, full=args.full_ingest)
-        # Avoid dumping tens of thousands of note ids into journald.
-        print(
-            "ingest:",
-            {k: v for k, v in result.items() if k != "touched_note_ids"},
-        )
-
-        roster = load_or_bootstrap(args.bootstrap)
-        print("roster_size:", len(roster.get("media") or []))
-
-        if not args.skip_themes:
-            touched: set[str] | None = None
-            if result.get("status") == "ok" and result.get("touched_note_ids"):
-                touched = set(result["touched_note_ids"])
-            # Hebdo = 7d only (jamais 30/90/365 — ces fenêtres réutilisent note_theme)
-            themes = classify_pending_notes(
-                limit=args.theme_limit,
-                note_ids=touched,
-                window_key="7d",
+    try:
+        if not args.cascade_only:
+            result = run_ingest(skip_download=args.skip_download, full=args.full_ingest)
+            # Avoid dumping tens of thousands of note ids into journald.
+            print(
+                "ingest:",
+                {k: v for k, v in result.items() if k != "touched_note_ids"},
             )
-            print("themes:", themes)
+            run["ingest"] = brief_ingest(result)
+
+            roster = load_or_bootstrap(args.bootstrap)
+            print("roster_size:", len(roster.get("media") or []))
+
+            if not args.skip_themes:
+                # Seule la semaine classe. Le thème est gardé, puis repris
+                # tel quel dans le 30 j, le 90 j et l’année.
+                themes = classify_pending_notes(
+                    limit=args.theme_limit,
+                    window_key="7d",
+                )
+                print("themes:", themes)
+                run["themes"] = brief_themes(themes)
+            else:
+                print("themes: skipped")
+                run["themes"] = "skipped"
+
+        if args.cascade_only or args.skip_x_sync or not settings.x_api_configured:
+            if not settings.x_api_configured and not args.cascade_only and not args.skip_x_sync:
+                logging.warning("X_BEARER_TOKEN manquant — moisson X ignorée, cascade seule")
+            harvest = {
+                "sync": None,
+                "cascade": cascade_longer_windows(),
+                "politicians_sync": None,
+                "politicians_cascade": cascade_politician_windows(),
+            }
         else:
-            print("themes: skipped")
+            harvest = run_weekly_harvest()
+        print("harvest:", harvest)
+        run["harvest"] = brief_harvest(harvest)
 
-    if args.cascade_only or args.skip_x_sync or not settings.x_api_configured:
-        if not settings.x_api_configured and not args.cascade_only and not args.skip_x_sync:
-            logging.warning("X_BEARER_TOKEN manquant — moisson X ignorée, cascade seule")
-        harvest = {
-            "sync": None,
-            "cascade": cascade_longer_windows(),
-            "politicians_sync": None,
-            "politicians_cascade": cascade_politician_windows(),
-        }
-    else:
-        harvest = run_weekly_harvest()
-    print("harvest:", harvest)
+        if not args.skip_score:
+            paths = score_all_windows(args.windows)
+            print("snapshots:", [str(p) for p in paths])
+            politician_paths = score_all_politicians_windows(args.windows)
+            print("politicians_snapshots:", [str(p) for p in politician_paths])
+            run["snapshots"] = [p.stem for p in paths] + [p.stem for p in politician_paths]
 
-    if args.skip_score:
+            if not args.skip_emails and not args.cascade_only:
+                from backend.export.emails_csv import write_emails_csv
+
+                csv_res = write_emails_csv()
+                print("emails_csv:", csv_res)
+                run["emails"] = brief_emails(csv_res)
+
+            if not args.skip_gov:
+                from backend.gov.sync import sync_gov_measures
+
+                gov_res = sync_gov_measures()
+                print("gov:", gov_res)
+                run["gov"] = brief_gov(gov_res)
+
         return 0
-
-    paths = score_all_windows(args.windows)
-    print("snapshots:", [str(p) for p in paths])
-    politician_paths = score_all_politicians_windows(args.windows)
-    print("politicians_snapshots:", [str(p) for p in politician_paths])
-
-    if not args.skip_emails and not args.cascade_only:
-        from backend.export.emails_csv import write_emails_csv
-
-        csv_res = write_emails_csv()
-        print("emails_csv:", csv_res)
-
-    if not args.skip_gov:
-        from backend.gov.sync import sync_gov_measures
-
-        print("gov:", sync_gov_measures())
-
-    return 0
+    except Exception as exc:
+        run["status"] = "failed"
+        run["reason"] = str(exc)[:400]
+        logging.exception("weekly pipeline failed")
+        return 1
+    finally:
+        out = push_weekly(run)
+        print("vigie:", "ok" if out.get("ok") else out)
 
 
 if __name__ == "__main__":

@@ -91,17 +91,11 @@ def _attributed_clause() -> str:
 
 
 def _classify_window_key(window_key: str | None) -> str:
-    """
-    Weekly moisson = 7d only. Maintenance (reclassif homogène) may use
-    30d/90d/365d/all — longer UI windows then reuse stored note_theme.
-    """
+    """Only the 7d window classifies. 30d/90d/365d reuse stored note_theme."""
     key = (window_key or "7d").strip().lower()
-    if key == "all":
-        return key
-    if key not in WINDOW_DAYS:
+    if key != "7d":
         raise ValueError(
-            f"theme classification window must be one of "
-            f"{sorted(WINDOW_DAYS)} or 'all', got {window_key!r}"
+            f"theme classification is 7d only (longer windows reuse stored themes), got {window_key!r}"
         )
     return key
 
@@ -109,8 +103,6 @@ def _classify_window_key(window_key: str | None) -> str:
 def _classify_window_filter(
     window_key: str, now: datetime | None = None
 ) -> tuple[str, list[Any]]:
-    if window_key == "all":
-        return "1", []
     as_of = now or window_as_of(window_key)
     since_ms, until_ms = cn_window_bounds(WINDOW_DAYS[window_key], as_of)
     return "n.created_at_ms >= ? AND n.created_at_ms < ?", [since_ms, until_ms]
@@ -163,7 +155,7 @@ def pending_attributed_notes(
     politician_ids: set[str] | None = None,
     now: datetime | None = None,
 ) -> list[dict[str, str]]:
-    """HELPFUL notes in the classify window (7d) linked to media or politician."""
+    """HELPFUL notes in the classify window linked to a media or politician."""
     window_key = _classify_window_key(window_key)
     win_sql, win_params = _classify_window_filter(window_key, now)
     attributed = _attributed_clause()
@@ -259,29 +251,6 @@ def count_pending_themes(*, window_key: str = "7d", now: datetime | None = None)
         )
 
 
-def list_attributed_note_ids(
-    *,
-    window_key: str = "365d",
-    now: datetime | None = None,
-) -> list[str]:
-    """All HELPFUL attributed note ids in window (for maintenance reclassif)."""
-    window_key = _classify_window_key(window_key)
-    win_sql, win_params = _classify_window_filter(window_key, now)
-    with db_session() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT DISTINCT n.note_id
-            FROM notes n
-            WHERE n.is_helpful = 1
-              AND {win_sql}
-              AND {_attributed_clause()}
-            ORDER BY n.created_at_ms DESC
-            """,
-            win_params,
-        ).fetchall()
-    return [str(r["note_id"]) for r in rows]
-
-
 def _classify_batch(batch: list[dict[str, str]], settings) -> dict[str, str]:
     from backend.themes.tweets import ensure_tweet_texts
 
@@ -359,7 +328,7 @@ def classify_pending_notes(
     media_ids: set[str] | None = None,
     politician_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Classify attributed notes in the current 7d window only (weekly moisson)."""
+    """Classify notes that still have no theme. Weekly moisson uses the 7d window."""
     settings = get_settings()
     if not settings.openai_configured:
         return {

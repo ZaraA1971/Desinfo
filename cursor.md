@@ -60,6 +60,7 @@ download CN dump → parse notes + status → filter HELPFUL
 | FastAPI | `127.0.0.1:8700` | `desinfo-api` |
 | Next.js | `127.0.0.1:8710` | `desinfo-frontend` |
 | Moisson hebdo | oneshot Mon 06:00 UTC | `desinfo-x-sync.timer` → `run_weekly.py` |
+| Vigie | fin de `run_weekly.py` | état complet poussé (succès **et** échec) via `backend/vigie_notify.py` |
 
 ## Relance services
 
@@ -302,13 +303,13 @@ Contrôle : `GET /api/ranking?window=7d&kind=politicians`.
 
 - Axes : politique, santé, économie, justice, international, science, technologie, faits divers (+ `autre` hors radar).
 - Sens : **longueur ∝ nombre de CN** sur le thème (max = bord ; 0 reste à 25 % du rayon).
-- Classification : LLM en fin de moisson hebdo — **fenêtre 7j courante seulement** (notes média ou candidat sans thème).
+- Classification : LLM en fin de moisson hebdo — **fenêtre 7 j seulement** (notes média ou candidat sans thème).
+  Le thème est **persisté** une fois. Le 30 j, le 90 j et l’année **ajoutent** ces thèmes déjà rangés : ils ne reclassent pas.
   Prompt agnostique : classer selon le **cœur de la correction** (pas le décor / mots-clés incidental) — `backend/themes/classify.py` `SYSTEM_PROMPT`.
-  Modèle : `OPENAI_MODEL` (prod = `gpt-5.4`). Hebdo = **7d** seulement ; 30/90/365 réutilisent `note_theme`.
+  Modèle : `OPENAI_MODEL` (prod = `gpt-5.4`).
   **Nouvel entrant** : lancer tout de suite `classify_pending_notes(media_ids=…)` / `(politician_ids=…)` (voir procédure ci-dessus) — ne pas attendre le lundi.
-  **Reclassif homogène** (changement prompt/modèle) :
-  `DESINFO_THEME_X_FETCH=cache_only ./venv/bin/python scripts/classify_themes.py --reclassify-all-in-window --window 365d`
-  (évite de brûler des crédits X ; tweets absents du cache → note seule).
+  **Reclassif** (changement de prompt, semaine courante seulement) :
+  `DESINFO_THEME_X_FETCH=cache_only ./venv/bin/python scripts/classify_themes.py --force`
 - Agrégation : `build_radar_profiles` (médias), `build_politician_radar_profiles` (candidats).
 - Snapshots : chaque item inclut `radar.axes[]` (`cn_count`, `weight`).
 - UI : clic ligne → panneau radar (médias et candidats). Script manuel : `scripts/classify_themes.py`.
@@ -399,7 +400,7 @@ pipelines d'attribution indépendants (aucun ne touche les tables de l'autre) :
 - **Incrémental** : scan de chaque jour **après** `last_dump_date` jusqu’à aujourd’hui. Jours absents ou incomplets = skip. Rien de nouveau = ingest `skipped`, la moisson X / score continue. 1ère moisson : dernier dump prêt dans `DESINFO_CN_LOOKBACK_DAYS` (21). Legacy : `last_dump_date` depuis `dump_date`.
 - Un jour n’est « prêt » que si `notes-00000.zip` **et** `noteStatusHistory-00000.zip` sont publiés (sinon skip — au petit matin UTC le status peut manquer encore). Commit **par jour** pour ne pas perdre les dumps déjà OK.
 - Attribution médias/candidats : **notes touchées uniquement** (rebuild complet si hash roster change).
-- Thèmes LLM : **7j courants**, notes sans `note_theme` ; après ingest, filtre sur `touched_note_ids` quand disponible.
+- Thèmes LLM : **7 j courants**, notes sans `note_theme`. Le 30 j / 90 j / 365 j réutilisent le thème persisté.
 - Moisson X : **1 req/@handle/semaine** (`counts/recent`) ; skip si `synced_at` récent ; 30/90/365 = cascade `*_posts_daily` (zéro API).
 - URL : `https://ton.twimg.com/birdwatch-public-data/YYYY/MM/DD/{notes|noteStatusHistory}/*.zip`
 - Pipeline disque : status → set HELPFUL → delete ; chaque shard notes → upsert HELPFUL only → delete.

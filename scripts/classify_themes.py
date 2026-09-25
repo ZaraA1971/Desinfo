@@ -31,11 +31,6 @@ def main() -> int:
         action="store_true",
         help="Reclassify 7d notes already tagged (prompt upgrade)",
     )
-    parser.add_argument(
-        "--window",
-        default="7d",
-        help="Classification window (7d only — longer windows use stored themes)",
-    )
     parser.add_argument("--skip-score", action="store_true")
     args = parser.parse_args()
 
@@ -49,7 +44,7 @@ def main() -> int:
         limit=args.limit,
         batch_size=args.batch_size,
         force=args.force,
-        window_key=args.window,
+        window_key="7d",
     )
     print("themes:", res)
     if not args.skip_score:
