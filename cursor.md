@@ -108,7 +108,7 @@ OPENAI_MODEL=gpt-5.4
 DESINFO_THEME_BATCH_SIZE=20
 DESINFO_THEME_MAX_PER_RUN=800
 DESINFO_X_ALLOW_TIMELINE=0
-DESINFO_X_SYNC_MIN_AGE_HOURS=168
+DESINFO_X_SYNC_MIN_AGE_HOURS=1
 DESINFO_THEME_X_FETCH=cache_only
 ```
 
@@ -128,14 +128,14 @@ Tarification X (pay-per-use, juil. 2026) — **ordre de coût** :
 
 Variables :
 - `DESINFO_X_ALLOW_TIMELINE=0` — pas de fallback timeline.
-- `DESINFO_X_SYNC_MIN_AGE_HOURS=168` — skip resync si déjà fait cette semaine.
+- `DESINFO_X_SYNC_MIN_AGE_HOURS` — `0` = forcer. Sinon skip **seulement** si les jours de **cette** semaine de cut sont déjà en base. Jamais un délai mur 168 h (le timer peut démarrer plus tôt et tout sauter).
 - `DESINFO_THEME_X_FETCH=cache_only|fetch|never` — texte tweet pour LLM.
 
 - **API X = 7d only** via `counts/recent` (1 req/handle unique, médias+candidats dédupliqués).
 - **Timer** : `desinfo-x-sync.timer` — **lundi 06:00 UTC** → `scripts/run_weekly.py`.
 - Stocke les buckets jour dans `media_posts_daily` + fenêtre `7d`.
 - **Cascade** (0 crédit) : somme des jours → `30d` / `90d` / `365d` dès que couverture ≥ `DESINFO_CASCADE_COVERAGE` (défaut 0.7). Remplissage **semaine par semaine** (1 moisson 7j = ~7 buckets/jour/compte).
-- UI : fenêtres 30/90/365 **grisées et non cliquables** tant que `windows_status[w].available` est false (`/api/meta`).
+- UI : fenêtres 30/90/365 **grisées** tant que la couverture n’est pas là (`DESINFO_CASCADE_COVERAGE`, défaut 0.7). Pas assez = on n’ouvre pas. Une fenêtre déjà remplie (cascade écrite) **reste ouverte**. Premier remplissage = cascade au seuil ; ensuite on met à jour même en-dessous. Horloge unique : `backend/windows/time.py`. Couverture unique : `backend/windows/coverage.py` (cascade, skip X, statut UI).
 - Moisson = **lundi 06:00 UTC** (pas l’heure réelle du job). `7d` = la semaine lundi→lundi qui vient de se terminer. Si ce créneau n’a pas encore de notes, on compte la **semaine passée** ; la date de moisson reste aujourd’hui. `30d`/`90d`/`365d` = accumulation coupée au même lundi 06:00. Un rescore en semaine ne glisse pas. Pas d’ingest quotidien. **Toujours parler CN sur la fenêtre demandée** (prod = `7d`) ; ne pas citer `cn_365d` du roster comme métrique live.
 
 ## Procédure — ajouter des comptes
@@ -219,14 +219,14 @@ cd /srv/desinfo
 ./venv/bin/python -c "
 from backend.x_client.sync import sync_all_post_counts, cascade_longer_windows
 from backend.scoring.rank import score_all_windows
-print(sync_all_post_counts(windows=['7d'], force_media_ids={'mon_media'}))
+print(sync_all_post_counts(windows=['7d']))
 print(cascade_longer_windows())
 print(score_all_windows(['7d']))
 "
 sudo systemctl restart desinfo-api
 ```
 
-Les **médias** déjà sync < `DESINFO_X_SYNC_MIN_AGE_HOURS` (168 h) sont **skippés** (tous leurs handles ombrelle inclus). Forcer : `force_media_ids={'id'}`. **1 req / @handle** unique. Pas de timeline.
+Les **médias** déjà moissonnés **cette semaine de cut** (lundi 06:00) sont **skippés** (tous leurs handles ombrelle inclus). `DESINFO_X_SYNC_MIN_AGE_HOURS=0` pour forcer. **1 req / @handle** unique. Pas de timeline.
 
 5. Contrôle (fenêtre live = **7d**) :
 
@@ -286,7 +286,7 @@ print("cascade:", cascade_politician_windows())
 print("snapshots:", [str(p) for p in score_all_politicians_windows()])
 PY
 sudo systemctl restart desinfo-api
-# Posts 7d : moisson hebdo (médias+candidats dédupliqués) ou sync_all_post_counts(force_politician_ids=…)
+# Posts 7d : moisson hebdo (médias+candidats dédupliqués) ou DESINFO_X_SYNC_MIN_AGE_HOURS=0 + sync_all_post_counts()
 ```
 
 Contrôle : `GET /api/ranking?window=7d&kind=politicians`.
@@ -389,7 +389,7 @@ pipelines d'attribution indépendants (aucun ne touche les tables de l'autre) :
 | `data/snapshots/latest_{window}.json` | `data/snapshots/latest_politicians_{window}.json` (+ `"kind": "politicians"`) |
 
 - `backend/ingest/pipeline.py` : `attribute_politicians(conn)` appelé juste après `attribute_notes(conn)` (même transaction) ; résultat inclut `note_politician_links`.
-- `backend/x_client/sync.py` : `sync_politicians_post_counts()` + `cascade_politician_windows()` miroir médias ; `run_weekly_harvest()` enchaîne médias puis politiques.
+- `backend/x_client/sync.py` : un seul chemin `sync_all_post_counts()` (médias+candidats, 1 req/@handle) puis `cascade_longer_windows()` / `cascade_politician_windows()`. Horloge unique : `backend/windows/time.py`. Couverture unique : `backend/windows/coverage.py`.
 - `scripts/run_weekly.py` : pipeline hebdo (CN → thèmes → X → cascade → score). `ingest_daily.py` = CN seul (manuel).
 - **UI** : onglets Médias | Candidats 2027 | Demandes des États ; `GET /api/ranking?kind=politicians&window=` ; défaut fenêtre = **7d** (même logique que médias).
 - **Demandes des États** : `GET /api/gov` lit `data/snapshots/latest_gov.json`. Source = fichiers publics `xai-org/x-algorithm` (pas d’API X). Catalogue `config/gov_measures.yml` + découverte des nouveaux `*_election_filter.rs`. Moisson dans `run_weekly.py` / `scripts/sync_gov.py`. L’UI **observe** le snapshot. Ce n’est **pas** un inventaire des posts retirés.

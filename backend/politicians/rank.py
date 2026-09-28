@@ -3,7 +3,7 @@
 Mirrors backend/scoring/rank.py (compute_ranking / write_snapshot / score_all_*)
 but sources note<->politician links (note_politician) and X post windows
 (politician_post_windows) instead of the media tables. WINDOW_DAYS is reused
-from backend.scoring.rank — a single formula/window definition per cursor.md.
+from backend.windows.time via scoring.rank — a single formula/window definition per cursor.md.
 """
 from __future__ import annotations
 

@@ -122,7 +122,6 @@ def main() -> int:
             harvest = {
                 "sync": None,
                 "cascade": cascade_longer_windows(),
-                "politicians_sync": None,
                 "politicians_cascade": cascade_politician_windows(),
             }
         else:

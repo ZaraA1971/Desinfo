@@ -11,55 +11,21 @@ from backend.config import get_settings
 from backend.db import db_session, get_meta, set_meta
 from backend.media_config import iter_x_handles, load_media_roster, primary_x_handle
 from backend.themes.radar import build_radar_profiles
+from backend.windows.time import (
+    WINDOW_DAYS,
+    as_utc,
+    last_weekly_as_of,
+    parse_window,
+    window_ms_bounds,
+)
 
 log = logging.getLogger("desinfo.scoring")
 
-WINDOW_DAYS = {"7d": 7, "30d": 30, "90d": 90, "365d": 365}
-
-
-def parse_window(window_key: str) -> int:
-    key = window_key.strip().lower()
-    if key not in WINDOW_DAYS:
-        raise ValueError(f"Invalid window '{window_key}', expected one of {list(WINDOW_DAYS)}")
-    return WINDOW_DAYS[key]
-
-
-def _utc(now: datetime | None = None) -> datetime:
-    now = now or datetime.now(timezone.utc)
-    if now.tzinfo is None:
-        return now.replace(tzinfo=timezone.utc)
-    return now.astimezone(timezone.utc)
-
 
 def _ms_since(days: int, now: datetime | None = None) -> int:
-    now = _utc(now)
+    now = as_utc(now)
     start = now - timedelta(days=days)
     return int(start.timestamp() * 1000)
-
-
-def window_ms_bounds(days: int, as_of: datetime) -> tuple[int, int]:
-    """Half-open window [as_of - days, as_of)."""
-    as_of = _utc(as_of)
-    until_ms = int(as_of.timestamp() * 1000)
-    since_ms = int((as_of - timedelta(days=days)).timestamp() * 1000)
-    return since_ms, until_ms
-
-
-def harvest_monday_utc(now: datetime | None = None) -> datetime:
-    """Monday 06:00 UTC on or before now — same instant every week."""
-    settings = get_settings()
-    now = _utc(now)
-    hour = max(0, min(23, int(settings.harvest_hour_utc)))
-    cut = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-    cut -= timedelta(days=now.weekday())
-    if cut > now:
-        cut -= timedelta(days=7)
-    return cut
-
-
-def last_weekly_as_of(now: datetime | None = None) -> datetime:
-    """This week's harvest cut: Monday 06:00 UTC, not the job start time."""
-    return harvest_monday_utc(now)
 
 
 def cn_window_bounds(days: int, harvest_as_of: datetime) -> tuple[int, int]:
@@ -69,7 +35,7 @@ def cn_window_bounds(days: int, harvest_as_of: datetime) -> tuple[int, int]:
     yet (dumps lag), count the previous week — the harvest date stays today.
     Longer windows end at the harvest cut.
     """
-    harvest_as_of = _utc(harvest_as_of)
+    harvest_as_of = as_utc(harvest_as_of)
     if days != 7:
         return window_ms_bounds(days, harvest_as_of)
     cut = harvest_as_of

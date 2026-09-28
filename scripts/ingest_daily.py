@@ -61,9 +61,9 @@ def main() -> int:
         print("themes: skipped")
 
     if args.with_x_sync and settings.x_api_configured:
-        from backend.x_client.sync import sync_roster_post_counts
+        from backend.x_client.sync import sync_all_post_counts
 
-        xres = sync_roster_post_counts(windows=["7d"])
+        xres = sync_all_post_counts(windows=["7d"])
         print("x_sync:", xres)
 
     # Cheap: refresh longer windows if daily history already allows it

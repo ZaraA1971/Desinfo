@@ -1,30 +1,11 @@
 """Radar profile: thematic CN weights per media (branch ∝ CN count)."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any
 
 from backend.themes.taxonomy import RADAR_THEMES, THEME_LABELS_FR
-
-_WINDOW_DAYS = {"7d": 7, "30d": 30, "90d": 90, "365d": 365}
-
-
-def _parse_window(window_key: str) -> int:
-    key = window_key.strip().lower()
-    if key not in _WINDOW_DAYS:
-        raise ValueError(f"Invalid window '{window_key}'")
-    return _WINDOW_DAYS[key]
-
-
-def _window_ms(days: int, now: datetime | None = None) -> tuple[int, int]:
-    now = now or datetime.now(timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    else:
-        now = now.astimezone(timezone.utc)
-    until_ms = int(now.timestamp() * 1000)
-    since_ms = int((now - timedelta(days=days)).timestamp() * 1000)
-    return since_ms, until_ms
+from backend.windows.time import last_weekly_as_of, parse_window, window_ms_bounds
 
 
 def _media_attribution_stats(
@@ -161,9 +142,9 @@ def build_radar_profiles(
     now: datetime | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Per-media radar: cn_count + weight (100 = thème le plus fort du média)."""
-    now = now or datetime.now(timezone.utc)
-    days = _parse_window(window_key)
-    since_ms, until_ms = _window_ms(days, now)
+    now = now or last_weekly_as_of()
+    days = parse_window(window_key)
+    since_ms, until_ms = window_ms_bounds(days, now)
     theme_counts, autre_counts = compute_media_theme_counts(
         conn, media_ids=media_ids, since_ms=since_ms, until_ms=until_ms
     )
@@ -251,9 +232,9 @@ def build_politician_radar_profiles(
     now: datetime | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Per-candidate radar: cn_count + weight (100 = thème le plus fort du candidat)."""
-    now = now or datetime.now(timezone.utc)
-    days = _parse_window(window_key)
-    since_ms, until_ms = _window_ms(days, now)
+    now = now or last_weekly_as_of()
+    days = parse_window(window_key)
+    since_ms, until_ms = window_ms_bounds(days, now)
     theme_counts, autre_counts = compute_politician_theme_counts(
         conn, politician_ids=politician_ids, since_ms=since_ms, until_ms=until_ms
     )

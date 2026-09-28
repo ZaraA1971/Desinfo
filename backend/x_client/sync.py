@@ -1,17 +1,28 @@
-"""Sync post counts from X API (7d cheap) + cascade longer windows from daily store."""
+"""One X path: 7d counts/recent per @handle, then cascade 30/90/365 from daily."""
 from __future__ import annotations
 
 import logging
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from backend.config import get_settings
 from backend.db import db_session, set_meta
-from backend.media_config import load_media_roster
+from backend.media_config import iter_x_handles, load_media_roster
 from backend.politicians.config import load_politicians_roster
-from backend.scoring.rank import WINDOW_DAYS, last_weekly_as_of
+from backend.windows.coverage import (
+    cascade_targets,
+    complete_daily_buckets,
+    coverage_need,
+    force_x_refresh,
+    harvest_week_range,
+    kind_tables,
+    min_days_for,
+    roster_entity_ids,
+    window_day_range,
+)
+from backend.windows.time import WINDOW_DAYS, last_weekly_as_of
 from backend.x_client.client import XApiError, _client, fetch_recent_daily_counts
 
 log = logging.getLogger("desinfo.x_sync")
@@ -21,66 +32,148 @@ def _build_handle_targets() -> dict[str, dict[str, list[str]]]:
     """Map x_handle -> {media_ids, politician_ids} (deduped API calls)."""
     out: dict[str, dict[str, list[str]]] = {}
     for m in load_media_roster().get("media") or []:
-        h = (m.get("x_handle") or "").lstrip("@").strip()
         mid = m.get("id")
-        if h and mid:
+        if not mid:
+            continue
+        for h in iter_x_handles(m):
             slot = out.setdefault(h, {"media_ids": [], "politician_ids": []})
-            slot["media_ids"].append(mid)
+            if mid not in slot["media_ids"]:
+                slot["media_ids"].append(mid)
     for c in load_politicians_roster().get("candidates") or []:
-        h = (c.get("x_handle") or "").lstrip("@").strip()
         pid = c.get("id")
-        if h and pid:
+        if not pid:
+            continue
+        for h in iter_x_handles(c):
             slot = out.setdefault(h, {"media_ids": [], "politician_ids": []})
-            slot["politician_ids"].append(pid)
+            if pid not in slot["politician_ids"]:
+                slot["politician_ids"].append(pid)
     return out
 
 
-def _handles_recently_synced(
-    window_key: str,
+def _handles_done_this_week(
     handle_targets: dict[str, dict[str, list[str]]],
-    *,
-    max_age_hours: int,
-) -> dict[str, int]:
-    """Map handle -> post_count if any linked entity synced recently."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
-    media_to_handle: dict[str, str] = {}
-    politician_to_handle: dict[str, str] = {}
-    for handle, targets in handle_targets.items():
-        for mid in targets.get("media_ids") or []:
-            media_to_handle[mid] = handle
-        for pid in targets.get("politician_ids") or []:
-            politician_to_handle[pid] = handle
-
-    out: dict[str, int] = {}
+) -> set[str]:
+    """Skip only when this harvest week's daily buckets are already there."""
+    if force_x_refresh():
+        return set()
+    start_day, end_day = harvest_week_range()
+    need = min_days_for(7)
+    done: set[str] = set()
     with db_session() as conn:
-        for table, id_col, id_to_handle in (
-            ("media_post_windows", "media_id", media_to_handle),
-            ("politician_post_windows", "politician_id", politician_to_handle),
-        ):
-            rows = conn.execute(
-                f"SELECT {id_col}, post_count, synced_at FROM {table} WHERE window_key=?",
-                (window_key,),
-            ).fetchall()
-            for r in rows:
-                try:
-                    ts = datetime.fromisoformat(r["synced_at"])
-                except Exception:
-                    continue
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
-                if ts < cutoff:
-                    continue
-                h = id_to_handle.get(r[id_col])
-                if h:
-                    out[h] = int(r["post_count"])
-    return out
+        for handle, targets in handle_targets.items():
+            ids_ok = False
+            for mid in targets.get("media_ids") or []:
+                n = int(
+                    conn.execute(
+                        """
+                        SELECT COUNT(*) AS n FROM media_posts_daily
+                        WHERE media_id=? AND day>=? AND day<?
+                        """,
+                        (mid, start_day, end_day),
+                    ).fetchone()["n"]
+                    or 0
+                )
+                if n >= need:
+                    ids_ok = True
+                    break
+            if not ids_ok:
+                for pid in targets.get("politician_ids") or []:
+                    n = int(
+                        conn.execute(
+                            """
+                            SELECT COUNT(*) AS n FROM politician_posts_daily
+                            WHERE politician_id=? AND day>=? AND day<?
+                            """,
+                            (pid, start_day, end_day),
+                        ).fetchone()["n"]
+                        or 0
+                    )
+                    if n >= need:
+                        ids_ok = True
+                        break
+            if ids_ok:
+                done.add(handle)
+    return done
+
+
+def _fetch_week(
+    client: Any,
+    handle: str,
+    since: datetime,
+    until: datetime,
+) -> tuple[int, list[tuple[str, int]]] | None:
+    result = fetch_recent_daily_counts(handle, since, until, client=client)
+    if result is None:
+        log.info("@%s: counts/recent unavailable — skip write", handle)
+        return None
+    _total, buckets = result
+    filled = complete_daily_buckets(buckets, since, until)
+    return sum(c for _, c in filled), filled
+
+
+def _accumulate(
+    filled: list[tuple[str, int]],
+    week_total: int,
+    media_ids: list[str],
+    politician_ids: list[str],
+    pending_media: dict[tuple[str, str], int],
+    pending_pol: dict[tuple[str, str], int],
+    pending_media_7d: dict[str, int],
+    pending_pol_7d: dict[str, int],
+) -> None:
+    for mid in media_ids:
+        pending_media_7d[mid] = pending_media_7d.get(mid, 0) + week_total
+        for day, count in filled:
+            key = (mid, day)
+            pending_media[key] = pending_media.get(key, 0) + count
+    for pid in politician_ids:
+        pending_pol_7d[pid] = pending_pol_7d.get(pid, 0) + week_total
+        for day, count in filled:
+            key = (pid, day)
+            pending_pol[key] = pending_pol.get(key, 0) + count
+
+
+def _write_kind_daily_and_window(
+    kind: str,
+    entity_ids: list[str],
+    *,
+    window_key: str,
+    total: int,
+    buckets: list[tuple[str, int]],
+    when: datetime,
+) -> None:
+    tables = kind_tables(kind)
+    daily_rows = [
+        (eid, day, int(count)) for eid in entity_ids for day, count in buckets
+    ]
+    window_rows = [
+        (eid, window_key, int(total), when.isoformat()) for eid in entity_ids
+    ]
+    with db_session() as conn:
+        if daily_rows:
+            conn.executemany(
+                f"""
+                INSERT INTO {tables["daily"]}({tables["id_col"]}, day, post_count)
+                VALUES (?, ?, ?)
+                ON CONFLICT({tables["id_col"]}, day) DO UPDATE SET
+                    post_count=excluded.post_count
+                """,
+                daily_rows,
+            )
+        conn.executemany(
+            f"""
+            INSERT INTO {tables["windows"]}({tables["id_col"]}, window_key, post_count, synced_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT({tables["id_col"]}, window_key) DO UPDATE SET
+                post_count=excluded.post_count,
+                synced_at=excluded.synced_at
+            """,
+            window_rows,
+        )
 
 
 def sync_all_post_counts(windows: list[str] | None = None) -> dict[str, Any]:
-    """
-    Cheapest path: one GET /tweets/counts/recent per unique @handle (media + politicians).
-    Longer windows = cascade only (no API).
-    """
+    """One GET /tweets/counts/recent per unique @handle. Longer windows = cascade."""
     settings = get_settings()
     handle_targets = _build_handle_targets()
     if not handle_targets:
@@ -92,80 +185,61 @@ def sync_all_post_counts(windows: list[str] | None = None) -> dict[str, Any]:
     if skipped:
         log.warning("skipping API sync for %s — use cascade instead", skipped)
 
-    until = datetime.now(timezone.utc)
+    cut = last_weekly_as_of()
+    since = cut - timedelta(days=7)
+    until = cut
     synced: dict[str, dict[str, int]] = {w: {} for w in api_windows}
     errors: list[str] = []
     status = "ok"
     days_written = 0
     api_calls = 0
     skipped_handles = 0
-    min_age = max(0, settings.x_sync_min_age_hours)
-
-    with db_session() as conn:
-        media_daily_n = int(
-            conn.execute("SELECT COUNT(*) AS n FROM media_posts_daily").fetchone()["n"]
-        )
-        politician_daily_n = int(
-            conn.execute("SELECT COUNT(*) AS n FROM politician_posts_daily").fetchone()["n"]
-        )
 
     with _client() as client:
         for w in api_windows:
-            days = WINDOW_DAYS[w]
-            since = until - timedelta(days=days)
             log.info(
-                "syncing posts window=%s days=%s unique_handles=%s",
+                "syncing posts window=%s cut=%s unique_handles=%s",
                 w,
-                days,
+                cut.isoformat(),
                 len(handle_targets),
             )
-            already = _handles_recently_synced(
-                w, handle_targets, max_age_hours=min_age
-            )
-            if media_daily_n == 0 and politician_daily_n == 0:
-                already = {}
-                log.info("posts_daily empty — forcing full 7d refresh")
+            already = _handles_done_this_week(handle_targets)
+            pending_media: dict[tuple[str, str], int] = {}
+            pending_pol: dict[tuple[str, str], int] = {}
+            pending_media_7d: dict[str, int] = {}
+            pending_pol_7d: dict[str, int] = {}
 
             for handle in sorted(handle_targets.keys()):
                 targets = handle_targets[handle]
+                media_ids = targets.get("media_ids") or []
+                politician_ids = targets.get("politician_ids") or []
                 if handle in already:
-                    n = already[handle]
-                    synced[w][handle] = n
                     skipped_handles += 1
-                    log.info("skip @%s (synced <%sh ago, count=%s)", handle, min_age, n)
+                    synced[w][handle] = 0
+                    log.info("skip @%s (this harvest week already in daily store)", handle)
                     continue
                 try:
-                    result = fetch_recent_daily_counts(handle, since, until, client=client)
-                    if result is None:
-                        log.info("@%s: counts/recent unavailable — skip write", handle)
+                    fetched = _fetch_week(client, handle, since, until)
+                    if fetched is None:
                         continue
-                    total, buckets = result
-                    media_ids = targets.get("media_ids") or []
-                    politician_ids = targets.get("politician_ids") or []
-                    if media_ids:
-                        _write_daily_and_window(
-                            media_ids,
-                            window_key=w,
-                            total=total,
-                            buckets=buckets,
-                            when=until,
-                        )
-                    if politician_ids:
-                        _write_politician_daily_and_window(
-                            politician_ids,
-                            window_key=w,
-                            total=total,
-                            buckets=buckets,
-                            when=until,
-                        )
-                    days_written += len(buckets) * (len(media_ids) + len(politician_ids))
-                    synced[w][handle] = total
+                    week_total, filled = fetched
+                    _accumulate(
+                        filled,
+                        week_total,
+                        media_ids,
+                        politician_ids,
+                        pending_media,
+                        pending_pol,
+                        pending_media_7d,
+                        pending_pol_7d,
+                    )
+                    synced[w][handle] = week_total
                     api_calls += 1
                     log.info(
                         "@%s → %s posts (counts/recent, %s days, media=%s pol=%s)",
                         handle,
-                        total,
-                        len(buckets),
+                        week_total,
+                        len(filled),
                         len(media_ids),
                         len(politician_ids),
                     )
@@ -180,27 +254,21 @@ def sync_all_post_counts(windows: list[str] | None = None) -> dict[str, Any]:
                         log.warning("rate limit on @%s — sleep 60s", handle)
                         time.sleep(60)
                         try:
-                            result = fetch_recent_daily_counts(handle, since, until, client=client)
-                            if result is None:
+                            fetched = _fetch_week(client, handle, since, until)
+                            if fetched is None:
                                 continue
-                            total, buckets = result
-                            if media_ids := targets.get("media_ids") or []:
-                                _write_daily_and_window(
-                                    media_ids,
-                                    window_key=w,
-                                    total=total,
-                                    buckets=buckets,
-                                    when=until,
-                                )
-                            if politician_ids := targets.get("politician_ids") or []:
-                                _write_politician_daily_and_window(
-                                    politician_ids,
-                                    window_key=w,
-                                    total=total,
-                                    buckets=buckets,
-                                    when=until,
-                                )
-                            synced[w][handle] = total
+                            week_total, filled = fetched
+                            _accumulate(
+                                filled,
+                                week_total,
+                                media_ids,
+                                politician_ids,
+                                pending_media,
+                                pending_pol,
+                                pending_media_7d,
+                                pending_pol_7d,
+                            )
+                            synced[w][handle] = week_total
                             api_calls += 1
                         except XApiError as e2:
                             errors.append(f"{w}/@{handle}: {e2.status} {e2.detail}")
@@ -212,16 +280,43 @@ def sync_all_post_counts(windows: list[str] | None = None) -> dict[str, Any]:
                 except Exception as e:
                     errors.append(f"{w}/@{handle}: {e}")
                     log.exception("skip @%s", handle)
-            else:
-                continue
-            break  # broken due to 402
 
-    stamp = until.isoformat()
-    with db_session() as conn:
-        set_meta(conn, "last_x_sync_at", stamp)
-        set_meta(conn, "last_x_sync_status", status)
-        set_meta(conn, "last_x_sync_politicians_at", stamp)
-        set_meta(conn, "last_x_sync_politicians_status", status)
+            by_media: dict[str, list[tuple[str, int]]] = defaultdict(list)
+            for (mid, day), count in pending_media.items():
+                by_media[mid].append((day, count))
+            for mid, buckets in by_media.items():
+                _write_kind_daily_and_window(
+                    "media",
+                    [mid],
+                    window_key=w,
+                    total=pending_media_7d.get(mid, 0),
+                    buckets=buckets,
+                    when=cut,
+                )
+                days_written += len(buckets)
+            by_pol: dict[str, list[tuple[str, int]]] = defaultdict(list)
+            for (pid, day), count in pending_pol.items():
+                by_pol[pid].append((day, count))
+            for pid, buckets in by_pol.items():
+                _write_kind_daily_and_window(
+                    "politicians",
+                    [pid],
+                    window_key=w,
+                    total=pending_pol_7d.get(pid, 0),
+                    buckets=buckets,
+                    when=cut,
+                )
+                days_written += len(buckets)
+
+    stamp = cut.isoformat()
+    if api_calls > 0:
+        with db_session() as conn:
+            set_meta(conn, "last_x_sync_at", stamp)
+            set_meta(conn, "last_x_sync_status", status)
+            set_meta(conn, "last_x_sync_politicians_at", stamp)
+            set_meta(conn, "last_x_sync_politicians_status", status)
+    elif skipped_handles and not errors:
+        status = "skipped_already_this_week"
 
     sample = synced.get("7d") or synced.get(api_windows[0]) or {}
     result = {
@@ -241,567 +336,99 @@ def sync_all_post_counts(windows: list[str] | None = None) -> dict[str, Any]:
     return result
 
 
-def sync_roster_post_counts(windows: list[str] | None = None) -> dict[str, Any]:
-    """
-    API sync — only cheap 7d counts/recent (stores daily buckets + window 7d).
-    Longer windows must use cascade_longer_windows() (no API).
-    """
-    settings = get_settings()
-    roster = load_media_roster()
-    media_list = roster.get("media") or []
-    windows = windows or list(settings.x_sync_windows) or ["7d"]
-    # Force API path to 7d only — never timeline-burn longer windows here
-    api_windows = [w for w in windows if w == "7d"]
-    if not api_windows:
-        api_windows = ["7d"]
-    skipped = [w for w in windows if w != "7d"]
-    if skipped:
-        log.warning("skipping API sync for %s — use cascade instead", skipped)
+def _cascade_kind(kind: str, *, now: datetime | None = None) -> dict[str, Any]:
+    """Sum daily buckets into 30/90/365. First write needs coverage; later updates keep going."""
+    now = now or last_weekly_as_of()
+    need = coverage_need()
+    targets = cascade_targets()
+    if not targets:
+        return {"status": "skip", "reason": "no cascade windows"}
 
-    handle_to_media: dict[str, list[str]] = defaultdict(list)
-    id_to_handle: dict[str, str] = {}
-    for m in media_list:
-        h = (m.get("x_handle") or "").lstrip("@").strip()
-        mid = m.get("id")
-        if h and mid:
-            handle_to_media[h].append(mid)
-            id_to_handle[mid] = h
+    tables = kind_tables(kind)
+    entity_ids = roster_entity_ids(kind)
+    if not entity_ids:
+        return {"status": "empty", "reason": "empty roster"}
 
-    if not handle_to_media:
-        raise RuntimeError("Aucun x_handle dans media_roster.yml")
-
-    until = datetime.now(timezone.utc)
-    synced: dict[str, dict[str, int]] = {w: {} for w in api_windows}
-    errors: list[str] = []
-    status = "ok"
-    days_written = 0
-
-    with _client() as client:
-        for w in api_windows:
-            days = WINDOW_DAYS[w]
-            since = until - timedelta(days=days)
-            log.info("syncing posts window=%s days=%s handles=%s", w, days, len(handle_to_media))
-            already = _already_synced(w, id_to_handle, max_age_hours=settings.x_sync_min_age_hours)
-            # Don't skip if we have no daily history yet (need buckets for cascade)
-            with db_session() as conn:
-                daily_n = int(
-                    conn.execute("SELECT COUNT(*) AS n FROM media_posts_daily").fetchone()["n"]
-                )
-            if daily_n == 0:
-                already = {}
-                log.info("media_posts_daily empty — forcing full 7d refresh")
-
-            for handle in sorted(handle_to_media.keys()):
-                if handle in already:
-                    n = already[handle]
-                    synced[w][handle] = n
-                    log.info("skip @%s (cached %s for %s)", handle, n, w)
-                    continue
-                try:
-                    result = fetch_recent_daily_counts(handle, since, until, client=client)
-                    if result is None:
-                        log.info("@%s: counts unavailable — skip write", handle)
-                        continue
-                    total, buckets = result
-                    _write_daily_and_window(
-                        handle_to_media[handle],
-                        window_key=w,
-                        total=total,
-                        buckets=buckets,
-                        when=until,
-                    )
-                    days_written += len(buckets) * len(handle_to_media[handle])
-                    synced[w][handle] = total
-                    log.info("@%s → %s posts (counts/recent, %s days)", handle, total, len(buckets))
-                    time.sleep(0.3)
-                except XApiError as e:
-                    errors.append(f"{w}/@{handle}: {e.status} {e.detail}")
-                    if e.status == 402:
-                        status = "partial_credits_depleted"
-                        log.error("credits depleted — stopping (partial sync kept)")
-                        break
-                    if e.status == 429:
-                        log.warning("rate limit on @%s — sleep 60s", handle)
-                        time.sleep(60)
-                        try:
-                            result = fetch_recent_daily_counts(handle, since, until, client=client)
-                            if result is None:
-                                continue
-                            total, buckets = result
-                            _write_daily_and_window(
-                                handle_to_media[handle],
-                                window_key=w,
-                                total=total,
-                                buckets=buckets,
-                                when=until,
-                            )
-                            synced[w][handle] = total
-                        except XApiError as e2:
-                            errors.append(f"{w}/@{handle}: {e2.status} {e2.detail}")
-                            if e2.status == 402:
-                                status = "partial_credits_depleted"
-                                break
-                    else:
-                        log.warning("skip @%s: %s", handle, e)
-                except Exception as e:
-                    errors.append(f"{w}/@{handle}: {e}")
-                    log.exception("skip @%s", handle)
-            else:
-                continue
-            break  # broken due to 402
+    stamp = now.isoformat()
+    out: dict[str, Any] = {"status": "ok", "windows": {}, "coverage_need": need}
+    label = "politicians" if kind == "politicians" else "media"
 
     with db_session() as conn:
-        set_meta(conn, "last_x_sync_at", until.isoformat())
-        set_meta(conn, "last_x_sync_status", status)
+        for w in targets:
+            days = WINDOW_DAYS[w]
+            start_day, end_day = window_day_range(days, now)
+            need_days = min_days_for(days, need)
+            written = 0
+            skipped_cov = 0
 
-    sample = synced.get("7d") or synced.get(api_windows[0]) or {}
-    result = {
-        "status": status,
-        "synced_at": until.isoformat(),
-        "windows": api_windows,
-        "synced_handles": {w: len(synced[w]) for w in api_windows},
-        "days_written": days_written,
-        "sample": {h: sample[h] for h in list(sample)[:8]},
-        "errors": errors[:10],
-    }
-    log.info("x sync done: %s", result)
-    return result
+            for eid in entity_ids:
+                row = conn.execute(
+                    f"""
+                    SELECT COUNT(*) AS n, COALESCE(SUM(post_count), 0) AS total
+                    FROM {tables["daily"]}
+                    WHERE {tables["id_col"]}=? AND day>=? AND day<?
+                    """,
+                    (eid, start_day, end_day),
+                ).fetchone()
+                n_days = int(row["n"] or 0)
+                total = int(row["total"] or 0)
+                existing = conn.execute(
+                    f"""
+                    SELECT 1 FROM {tables["windows"]}
+                    WHERE {tables["id_col"]}=? AND window_key=?
+                    """,
+                    (eid, w),
+                ).fetchone()
+                if n_days < need_days and not existing:
+                    skipped_cov += 1
+                    continue
+                conn.execute(
+                    f"""
+                    INSERT INTO {tables["windows"]}({tables["id_col"]}, window_key, post_count, synced_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT({tables["id_col"]}, window_key) DO UPDATE SET
+                        post_count=excluded.post_count,
+                        synced_at=excluded.synced_at
+                    """,
+                    (eid, w, total, stamp),
+                )
+                written += 1
+
+            out["windows"][w] = {
+                "written": written,
+                "skipped_low_coverage": skipped_cov,
+                "min_days": need_days,
+                "range": [start_day, end_day],
+            }
+            log.info(
+                "cascade %s %s: written=%s skipped=%s min_days=%s",
+                label,
+                w,
+                written,
+                skipped_cov,
+                need_days,
+            )
+
+        set_meta(conn, tables["meta_cascade"], stamp)
+
+    return out
 
 
 def cascade_longer_windows(*, now: datetime | None = None) -> dict[str, Any]:
-    """
-    Derive 30d/90d/365d post counts from media_posts_daily — zero X API cost.
-    Only writes a window when day coverage in that range >= DESINFO_CASCADE_COVERAGE.
-    """
-    settings = get_settings()
-    now = now or last_weekly_as_of()
-    coverage_need = max(0.1, min(1.0, settings.cascade_coverage))
-    targets = [w for w in settings.cascade_windows if w in WINDOW_DAYS and w != "7d"]
-    if not targets:
-        return {"status": "skip", "reason": "no cascade windows"}
-
-    stamp = now.isoformat()
-    out: dict[str, Any] = {"status": "ok", "windows": {}, "coverage_need": coverage_need}
-
-    with db_session() as conn:
-        media_ids = [
-            r["media_id"]
-            for r in conn.execute("SELECT DISTINCT media_id FROM media_posts_daily").fetchall()
-        ]
-        if not media_ids:
-            # also try roster media even without daily yet
-            return {"status": "empty", "reason": "no daily rows yet"}
-
-        for w in targets:
-            days = WINDOW_DAYS[w]
-            start_day = (now - timedelta(days=days)).strftime("%Y-%m-%d")
-            end_day = now.strftime("%Y-%m-%d")
-            min_days = max(1, int(days * coverage_need))
-            written = 0
-            skipped_cov = 0
-
-            for mid in media_ids:
-                row = conn.execute(
-                    """
-                    SELECT COUNT(*) AS n, COALESCE(SUM(post_count), 0) AS total
-                    FROM media_posts_daily
-                    WHERE media_id=? AND day>=? AND day<=?
-                    """,
-                    (mid, start_day, end_day),
-                ).fetchone()
-                n_days = int(row["n"] or 0)
-                total = int(row["total"] or 0)
-                if n_days < min_days:
-                    skipped_cov += 1
-                    continue
-                conn.execute(
-                    """
-                    INSERT INTO media_post_windows(media_id, window_key, post_count, synced_at)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(media_id, window_key) DO UPDATE SET
-                        post_count=excluded.post_count,
-                        synced_at=excluded.synced_at
-                    """,
-                    (mid, w, total, stamp),
-                )
-                written += 1
-
-            out["windows"][w] = {
-                "written": written,
-                "skipped_low_coverage": skipped_cov,
-                "min_days": min_days,
-                "range": [start_day, end_day],
-            }
-            log.info(
-                "cascade %s: written=%s skipped=%s min_days=%s",
-                w,
-                written,
-                skipped_cov,
-                min_days,
-            )
-
-        set_meta(conn, "last_cascade_at", stamp)
-
-    return out
-
-
-def sync_politicians_post_counts(windows: list[str] | None = None) -> dict[str, Any]:
-    """
-    API sync for politicians — mirrors sync_roster_post_counts (media): cheap 7d
-    counts/recent only (stores daily buckets + window 7d). Longer windows must
-    use cascade_politician_windows() (no API).
-    """
-    settings = get_settings()
-    roster = load_politicians_roster()
-    candidates = roster.get("candidates") or []
-    windows = windows or list(settings.x_sync_windows) or ["7d"]
-    api_windows = [w for w in windows if w == "7d"]
-    if not api_windows:
-        api_windows = ["7d"]
-    skipped = [w for w in windows if w != "7d"]
-    if skipped:
-        log.warning("skipping politicians API sync for %s — use cascade instead", skipped)
-
-    handle_to_politician: dict[str, list[str]] = defaultdict(list)
-    id_to_handle: dict[str, str] = {}
-    for c in candidates:
-        h = (c.get("x_handle") or "").lstrip("@").strip()
-        pid = c.get("id")
-        if h and pid:
-            handle_to_politician[h].append(pid)
-            id_to_handle[pid] = h
-
-    if not handle_to_politician:
-        raise RuntimeError("Aucun x_handle dans politicians_roster.yml")
-
-    until = datetime.now(timezone.utc)
-    synced: dict[str, dict[str, int]] = {w: {} for w in api_windows}
-    errors: list[str] = []
-    status = "ok"
-    days_written = 0
-
-    with _client() as client:
-        for w in api_windows:
-            days = WINDOW_DAYS[w]
-            since = until - timedelta(days=days)
-            log.info(
-                "syncing politician posts window=%s days=%s handles=%s",
-                w,
-                days,
-                len(handle_to_politician),
-            )
-            already = _already_synced_politicians(
-                w, id_to_handle, max_age_hours=settings.x_sync_min_age_hours
-            )
-            with db_session() as conn:
-                daily_n = int(
-                    conn.execute(
-                        "SELECT COUNT(*) AS n FROM politician_posts_daily"
-                    ).fetchone()["n"]
-                )
-            if daily_n == 0:
-                already = {}
-                log.info("politician_posts_daily empty — forcing full 7d refresh")
-
-            for handle in sorted(handle_to_politician.keys()):
-                if handle in already:
-                    n = already[handle]
-                    synced[w][handle] = n
-                    log.info("skip @%s (cached %s for %s)", handle, n, w)
-                    continue
-                try:
-                    result = fetch_recent_daily_counts(handle, since, until, client=client)
-                    if result is None:
-                        log.info("@%s: counts unavailable — skip write", handle)
-                        continue
-                    total, buckets = result
-                    _write_politician_daily_and_window(
-                        handle_to_politician[handle],
-                        window_key=w,
-                        total=total,
-                        buckets=buckets,
-                        when=until,
-                    )
-                    days_written += len(buckets) * len(handle_to_politician[handle])
-                    synced[w][handle] = total
-                    log.info("@%s → %s posts (counts/recent, %s days)", handle, total, len(buckets))
-                    time.sleep(0.3)
-                except XApiError as e:
-                    errors.append(f"{w}/@{handle}: {e.status} {e.detail}")
-                    if e.status == 402:
-                        status = "partial_credits_depleted"
-                        log.error("credits depleted — stopping (partial sync kept)")
-                        break
-                    if e.status == 429:
-                        log.warning("rate limit on @%s — sleep 60s", handle)
-                        time.sleep(60)
-                        try:
-                            result = fetch_recent_daily_counts(handle, since, until, client=client)
-                            if result is None:
-                                continue
-                            total, buckets = result
-                            _write_politician_daily_and_window(
-                                handle_to_politician[handle],
-                                window_key=w,
-                                total=total,
-                                buckets=buckets,
-                                when=until,
-                            )
-                            synced[w][handle] = total
-                        except XApiError as e2:
-                            errors.append(f"{w}/@{handle}: {e2.status} {e2.detail}")
-                            if e2.status == 402:
-                                status = "partial_credits_depleted"
-                                break
-                    else:
-                        log.warning("skip @%s: %s", handle, e)
-                except Exception as e:
-                    errors.append(f"{w}/@{handle}: {e}")
-                    log.exception("skip @%s", handle)
-            else:
-                continue
-            break  # broken due to 402
-
-    with db_session() as conn:
-        set_meta(conn, "last_x_sync_politicians_at", until.isoformat())
-        set_meta(conn, "last_x_sync_politicians_status", status)
-
-    sample = synced.get("7d") or synced.get(api_windows[0]) or {}
-    result = {
-        "status": status,
-        "synced_at": until.isoformat(),
-        "windows": api_windows,
-        "synced_handles": {w: len(synced[w]) for w in api_windows},
-        "days_written": days_written,
-        "sample": {h: sample[h] for h in list(sample)[:8]},
-        "errors": errors[:10],
-    }
-    log.info("x sync (politicians) done: %s", result)
-    return result
+    """Derive 30d/90d/365d post counts from media_posts_daily — zero X API cost."""
+    return _cascade_kind("media", now=now)
 
 
 def cascade_politician_windows(*, now: datetime | None = None) -> dict[str, Any]:
-    """
-    Derive 30d/90d/365d politician post counts from politician_posts_daily —
-    zero X API cost. Mirrors cascade_longer_windows() (media).
-    """
-    settings = get_settings()
-    now = now or last_weekly_as_of()
-    coverage_need = max(0.1, min(1.0, settings.cascade_coverage))
-    targets = [w for w in settings.cascade_windows if w in WINDOW_DAYS and w != "7d"]
-    if not targets:
-        return {"status": "skip", "reason": "no cascade windows"}
-
-    stamp = now.isoformat()
-    out: dict[str, Any] = {"status": "ok", "windows": {}, "coverage_need": coverage_need}
-
-    with db_session() as conn:
-        politician_ids = [
-            r["politician_id"]
-            for r in conn.execute(
-                "SELECT DISTINCT politician_id FROM politician_posts_daily"
-            ).fetchall()
-        ]
-        if not politician_ids:
-            return {"status": "empty", "reason": "no daily rows yet"}
-
-        for w in targets:
-            days = WINDOW_DAYS[w]
-            start_day = (now - timedelta(days=days)).strftime("%Y-%m-%d")
-            end_day = now.strftime("%Y-%m-%d")
-            min_days = max(1, int(days * coverage_need))
-            written = 0
-            skipped_cov = 0
-
-            for pid in politician_ids:
-                row = conn.execute(
-                    """
-                    SELECT COUNT(*) AS n, COALESCE(SUM(post_count), 0) AS total
-                    FROM politician_posts_daily
-                    WHERE politician_id=? AND day>=? AND day<=?
-                    """,
-                    (pid, start_day, end_day),
-                ).fetchone()
-                n_days = int(row["n"] or 0)
-                total = int(row["total"] or 0)
-                if n_days < min_days:
-                    skipped_cov += 1
-                    continue
-                conn.execute(
-                    """
-                    INSERT INTO politician_post_windows(politician_id, window_key, post_count, synced_at)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(politician_id, window_key) DO UPDATE SET
-                        post_count=excluded.post_count,
-                        synced_at=excluded.synced_at
-                    """,
-                    (pid, w, total, stamp),
-                )
-                written += 1
-
-            out["windows"][w] = {
-                "written": written,
-                "skipped_low_coverage": skipped_cov,
-                "min_days": min_days,
-                "range": [start_day, end_day],
-            }
-            log.info(
-                "cascade politicians %s: written=%s skipped=%s min_days=%s",
-                w,
-                written,
-                skipped_cov,
-                min_days,
-            )
-
-        set_meta(conn, "last_cascade_politicians_at", stamp)
-
-    return out
+    """Derive 30d/90d/365d politician post counts — zero X API cost."""
+    return _cascade_kind("politicians", now=now)
 
 
 def run_weekly_harvest() -> dict[str, Any]:
-    """Weekly job: unified 7d counts/recent → cascade → ready for scoring."""
+    """Weekly job: unified 7d counts/recent → cascade médias + candidats."""
     sync_res = sync_all_post_counts(windows=["7d"])
-    cascade_res = cascade_longer_windows()
-    politicians_cascade_res = cascade_politician_windows()
     return {
         "sync": sync_res,
-        "cascade": cascade_res,
-        "politicians_sync": sync_res,
-        "politicians_cascade": politicians_cascade_res,
+        "cascade": cascade_longer_windows(),
+        "politicians_cascade": cascade_politician_windows(),
     }
-
-
-def _write_daily_and_window(
-    media_ids: list[str],
-    *,
-    window_key: str,
-    total: int,
-    buckets: list[tuple[str, int]],
-    when: datetime,
-) -> None:
-    daily_rows = [
-        (media_id, day, int(count))
-        for media_id in media_ids
-        for day, count in buckets
-    ]
-    window_rows = [
-        (media_id, window_key, int(total), when.isoformat())
-        for media_id in media_ids
-    ]
-    with db_session() as conn:
-        if daily_rows:
-            conn.executemany(
-                """
-                INSERT INTO media_posts_daily(media_id, day, post_count)
-                VALUES (?, ?, ?)
-                ON CONFLICT(media_id, day) DO UPDATE SET
-                    post_count=excluded.post_count
-                """,
-                daily_rows,
-            )
-        conn.executemany(
-            """
-            INSERT INTO media_post_windows(media_id, window_key, post_count, synced_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(media_id, window_key) DO UPDATE SET
-                post_count=excluded.post_count,
-                synced_at=excluded.synced_at
-            """,
-            window_rows,
-        )
-
-
-def _already_synced(
-    window_key: str,
-    id_to_handle: dict[str, str],
-    max_age_hours: int = 6,
-) -> dict[str, int]:
-    """Map handle -> post_count for rows synced recently."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
-    out: dict[str, int] = {}
-    with db_session() as conn:
-        rows = conn.execute(
-            "SELECT media_id, post_count, synced_at FROM media_post_windows WHERE window_key=?",
-            (window_key,),
-        ).fetchall()
-        for r in rows:
-            try:
-                ts = datetime.fromisoformat(r["synced_at"])
-            except Exception:
-                continue
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            if ts < cutoff:
-                continue
-            h = id_to_handle.get(r["media_id"])
-            if h:
-                out[h] = int(r["post_count"])
-    return out
-
-
-def _write_politician_daily_and_window(
-    politician_ids: list[str],
-    *,
-    window_key: str,
-    total: int,
-    buckets: list[tuple[str, int]],
-    when: datetime,
-) -> None:
-    daily_rows = [
-        (politician_id, day, int(count))
-        for politician_id in politician_ids
-        for day, count in buckets
-    ]
-    window_rows = [
-        (politician_id, window_key, int(total), when.isoformat())
-        for politician_id in politician_ids
-    ]
-    with db_session() as conn:
-        if daily_rows:
-            conn.executemany(
-                """
-                INSERT INTO politician_posts_daily(politician_id, day, post_count)
-                VALUES (?, ?, ?)
-                ON CONFLICT(politician_id, day) DO UPDATE SET
-                    post_count=excluded.post_count
-                """,
-                daily_rows,
-            )
-        conn.executemany(
-            """
-            INSERT INTO politician_post_windows(politician_id, window_key, post_count, synced_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(politician_id, window_key) DO UPDATE SET
-                post_count=excluded.post_count,
-                synced_at=excluded.synced_at
-            """,
-            window_rows,
-        )
-
-
-def _already_synced_politicians(
-    window_key: str,
-    id_to_handle: dict[str, str],
-    max_age_hours: int = 6,
-) -> dict[str, int]:
-    """Map handle -> post_count for politician window rows synced recently."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
-    out: dict[str, int] = {}
-    with db_session() as conn:
-        rows = conn.execute(
-            "SELECT politician_id, post_count, synced_at FROM politician_post_windows WHERE window_key=?",
-            (window_key,),
-        ).fetchall()
-        for r in rows:
-            try:
-                ts = datetime.fromisoformat(r["synced_at"])
-            except Exception:
-                continue
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            if ts < cutoff:
-                continue
-            h = id_to_handle.get(r["politician_id"])
-            if h:
-                out[h] = int(r["post_count"])
-    return out
