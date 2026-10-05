@@ -154,3 +154,9 @@ media:
   x_handle: slatefr
   rank_bootstrap: 33
   cn_365d: 3
+- id: soyons_precis_gv
+  name: Soyons précis
+  domains: []
+  x_handle: SoyonsPrecisGv
+  rank_bootstrap: 34
+  cn_365d: 0
