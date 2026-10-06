@@ -54,9 +54,12 @@ def post_chat_completion(
     if not cfg.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured")
 
-    model = cfg.openai_model or __import__(
-        "backend.llm_pick", fromlist=["pick"]
-    ).pick("chatgpt", "cheap")
+    if cfg.openai_model:
+        model = cfg.openai_model
+    else:
+        from llm_router import pick
+
+        model = pick("chatgpt", "cheap")
     payload = build_chat_payload(
         model=model,
         messages=messages,
