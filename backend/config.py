@@ -57,7 +57,7 @@ class Settings:
 
         # Theme classification (OpenAI) — radar médias
         self.openai_api_key: str | None = os.environ.get("OPENAI_API_KEY") or None
-        self.openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.4")
+        self.openai_model: str = os.environ.get("OPENAI_MODEL", "").strip()
         self.openai_base_url: str = os.environ.get(
             "OPENAI_BASE_URL", "https://api.openai.com/v1"
         )
