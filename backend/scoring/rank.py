@@ -9,33 +9,66 @@ from typing import Any
 
 from backend.config import get_settings
 from backend.db import db_session, get_meta, set_meta
-from backend.media_config import load_media_roster
+from backend.media_config import iter_x_handles, load_media_roster, primary_x_handle
 from backend.themes.radar import build_radar_profiles
+from backend.windows.time import (
+    WINDOW_DAYS,
+    as_utc,
+    last_weekly_as_of,
+    parse_window,
+    window_ms_bounds,
+)
 
 log = logging.getLogger("desinfo.scoring")
 
-WINDOW_DAYS = {"7d": 7, "30d": 30, "90d": 90, "365d": 365}
-
-
-def parse_window(window_key: str) -> int:
-    key = window_key.strip().lower()
-    if key not in WINDOW_DAYS:
-        raise ValueError(f"Invalid window '{window_key}', expected one of {list(WINDOW_DAYS)}")
-    return WINDOW_DAYS[key]
-
 
 def _ms_since(days: int, now: datetime | None = None) -> int:
-    now = now or datetime.now(timezone.utc)
+    now = as_utc(now)
     start = now - timedelta(days=days)
     return int(start.timestamp() * 1000)
+
+
+def cn_window_bounds(days: int, harvest_as_of: datetime) -> tuple[int, int]:
+    """CN window for a harvest.
+
+    7d = the Monday–Monday week that just ended. If that slot has no notes
+    yet (dumps lag), count the previous week — the harvest date stays today.
+    Longer windows end at the harvest cut.
+    """
+    harvest_as_of = as_utc(harvest_as_of)
+    if days != 7:
+        return window_ms_bounds(days, harvest_as_of)
+    cut = harvest_as_of
+    with db_session() as conn:
+        for _ in range(12):
+            since_ms, until_ms = window_ms_bounds(7, cut)
+            row = conn.execute(
+                """
+                SELECT 1 FROM notes
+                WHERE is_helpful=1 AND created_at_ms >= ? AND created_at_ms < ?
+                LIMIT 1
+                """,
+                (since_ms, until_ms),
+            ).fetchone()
+            if row:
+                return since_ms, until_ms
+            cut -= timedelta(days=7)
+    return window_ms_bounds(7, harvest_as_of)
+
+
+def window_as_of(window_key: str, now: datetime | None = None) -> datetime:
+    """Every ranking window is cut at this week's Monday 06:00 harvest."""
+    return last_weekly_as_of(now)
 
 
 def compute_ranking(window_key: str | None = None, *, now: datetime | None = None) -> dict[str, Any]:
     settings = get_settings()
     window_key = (window_key or settings.default_window).strip().lower()
     days = parse_window(window_key)
-    now = now or datetime.now(timezone.utc)
-    since_ms = _ms_since(days, now)
+    generated_at = now or datetime.now(timezone.utc)
+    as_of = window_as_of(window_key, generated_at)
+    since_ms, until_ms = cn_window_bounds(days, as_of)
+    radar_as_of = datetime.fromtimestamp(until_ms / 1000, tz=timezone.utc)
 
     roster = load_media_roster()
     roster_media = roster.get("media") or []
@@ -68,7 +101,8 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
                     "id": mid,
                     "name": m.get("name", mid),
                     "domains": ",".join(m.get("domains") or []),
-                    "x_handle": m.get("x_handle"),
+                    "x_handle": primary_x_handle(m),
+                    "x_handles": iter_x_handles(m),
                 }
 
         counts: dict[str, int] = {mid: 0 for mid in roster_ids}
@@ -78,11 +112,12 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
                 SELECT nm.media_id, COUNT(DISTINCT nm.note_id) AS cn
                 FROM note_media nm
                 JOIN notes n ON n.note_id = nm.note_id
-                WHERE n.is_helpful=1 AND n.created_at_ms >= ?
+                WHERE n.is_helpful=1
+                  AND n.created_at_ms >= ? AND n.created_at_ms < ?
                   AND nm.media_id IN ({placeholders})
                 GROUP BY nm.media_id
             """
-            rows = conn.execute(q, [since_ms, *roster_ids]).fetchall()
+            rows = conn.execute(q, [since_ms, until_ms, *roster_ids]).fetchall()
             for r in rows:
                 counts[r["media_id"]] = int(r["cn"])
 
@@ -106,7 +141,7 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
 
         last_ingest = get_meta(conn, "last_ingest_at")
         radar_by_media = build_radar_profiles(
-            conn, media_ids=roster_ids, window_key=window_key, now=now
+            conn, media_ids=roster_ids, window_key=window_key, now=radar_as_of
         )
 
     metric_mode = "post_cn" if any_posts else "cn_only"
@@ -128,12 +163,17 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
             rate = None
             ratio_post_cn = None
 
+        roster_m = roster_by_id.get(mid) or {}
+        handles = iter_x_handles(roster_m) or (
+            [meta["x_handle"]] if meta.get("x_handle") else []
+        )
         entries.append(
             {
                 "media_id": mid,
                 "name": meta.get("name") or mid,
                 "domains": (meta.get("domains") or "").split(",") if isinstance(meta.get("domains"), str) else meta.get("domains") or [],
-                "x_handle": meta.get("x_handle"),
+                "x_handle": primary_x_handle(roster_m) or meta.get("x_handle"),
+                "x_handles": handles or None,
                 "cn_count": cn,
                 "post_count": posts,
                 "rate_cn_per_post": rate,
@@ -165,9 +205,10 @@ def compute_ranking(window_key: str | None = None, *, now: datetime | None = Non
             e["delta_rank"] = prev - e["rank"]
 
     snapshot = {
-        "generated_at": now.isoformat(),
+        "generated_at": generated_at.isoformat(),
         "window": window_key,
         "window_days": days,
+        "cn_as_of": as_of.isoformat(),
         "metric_mode": metric_mode,
         "last_ingest_at": last_ingest,
         "roster_size": len(roster_ids),

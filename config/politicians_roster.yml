@@ -3,7 +3,7 @@
 # Roster souverain : éditer ici ; pas de bootstrap auto.
 election: "2027"
 source: "https://www.france24.com/fr/france/20260524-france-presidentielle-2027-qui-sont-les-candidats-officiellement-declares"
-updated_at: "2026-07-23"
+updated_at: "2026-08-28"
 candidates:
   - id: nathalie_arthaud
     name: Nathalie Arthaud
@@ -55,6 +55,11 @@ candidates:
     party: Solution démocratique
     x_handle: ClaraEgger
     aliases: ["Clara Egger", "@ClaraEgger"]
+  - id: raphael_glucksmann
+    name: Raphaël Glucksmann
+    party: Place publique
+    x_handle: rglucks1
+    aliases: ["Raphaël Glucksmann", "Raphael Glucksmann", "Glucksmann", "@rglucks1"]
   - id: jerome_guedj
     name: Jérôme Guedj
     party: Parti socialiste

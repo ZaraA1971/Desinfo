@@ -26,6 +26,7 @@ from backend.media_config import load_media_roster
 from backend.politicians.config import load_politicians_roster
 from backend.scoring.rank import WINDOW_DAYS
 from backend.themes.classify import count_pending_themes
+from backend.gov.sync import snapshot_path as gov_snapshot_path
 from backend.windows.status import compute_windows_status
 
 log = logging.getLogger("desinfo.api")
@@ -33,6 +34,7 @@ log = logging.getLogger("desinfo.api")
 # (kind, window) -> (mtime, payload)
 _snapshot_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
 KINDS = ("media", "politicians")
+_gov_cache: tuple[float, dict[str, Any]] | None = None
 
 
 def _next_x_sync_at(now: datetime | None = None) -> str:
@@ -129,6 +131,24 @@ def _snapshot_path(window: str, kind: str = "media") -> Path:
     raise HTTPException(status_code=404, detail=f"No snapshot for window={window}")
 
 
+def _load_gov_snapshot() -> dict[str, Any]:
+    global _gov_cache
+    path = gov_snapshot_path()
+    try:
+        mtime = path.stat().st_mtime
+    except OSError as e:
+        raise HTTPException(status_code=404, detail="No gov snapshot") from e
+    cached = _gov_cache
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"Corrupt gov snapshot: {e}") from e
+    _gov_cache = (mtime, data)
+    return data
+
+
 def _load_snapshot(window: str, kind: str = "media") -> dict[str, Any]:
     path = _snapshot_path(window, kind)
     cache_key = (kind, window)
@@ -201,8 +221,11 @@ def meta(request: Request) -> dict[str, Any]:
     politicians = load_politicians_roster()
     last_ingest = None
     last_theme = None
+    last_gov = None
     theme_classified = 0
     theme_pending = 0
+    gov_measure_count = 0
+    gov_account_count = 0
     windows_status = compute_windows_status(kind="media")
     politicians_windows_status = compute_windows_status(kind="politicians")
     windows_ready = {
@@ -220,6 +243,9 @@ def meta(request: Request) -> dict[str, Any]:
         with db_session() as conn:
             last_ingest = get_meta(conn, "last_ingest_at")
             last_theme = get_meta(conn, "last_theme_classify_at")
+            last_gov = get_meta(conn, "last_gov_sync_at")
+            gov_measure_count = int(get_meta(conn, "gov_measure_count") or 0)
+            gov_account_count = int(get_meta(conn, "gov_account_count") or 0)
             theme_classified = int(
                 conn.execute("SELECT COUNT(*) AS n FROM note_theme").fetchone()["n"]
             )
@@ -228,8 +254,11 @@ def meta(request: Request) -> dict[str, Any]:
         log.warning("meta db read failed: %s", e)
         last_ingest = None
         last_theme = None
+        last_gov = None
         theme_classified = 0
         theme_pending = 0
+        gov_measure_count = 0
+        gov_account_count = 0
 
     default_snap = None
     try:
@@ -257,6 +286,9 @@ def meta(request: Request) -> dict[str, Any]:
         "openai_themes_configured": settings.openai_configured,
         "metric_mode": (default_snap or {}).get("metric_mode", "cn_only"),
         "kinds": list(KINDS),
+        "gov_measure_count": gov_measure_count,
+        "gov_account_count": gov_account_count,
+        "last_gov_sync_at": last_gov,
     }
 
 
@@ -277,6 +309,12 @@ def ranking(
             detail=f"Fenêtre {resolved_window} pas encore disponible (cascade en cours)",
         )
     return _load_snapshot(resolved_window, resolved_kind)
+
+
+@app.get("/api/gov")
+def gov_requests(request: Request) -> dict[str, Any]:
+    _check_rate(request, kind="get")
+    return _load_gov_snapshot()
 
 
 @app.post("/api/export")

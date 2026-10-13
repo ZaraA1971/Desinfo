@@ -14,7 +14,10 @@ from backend.config import get_settings
 log = logging.getLogger("desinfo.ingest.download")
 
 MAX_SHARDS = 20
-BASE = "https://ton.twimg.com/birdwatch-public-data"
+
+
+def _base_url() -> str:
+    return get_settings().cn_base_url.rstrip("/")
 
 
 def _sha256(path: Path) -> str:
@@ -25,11 +28,48 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def candidate_dates(explicit: date | None = None) -> list[date]:
+def candidate_dates(explicit: date | None = None, *, lookback_days: int | None = None) -> list[date]:
     if explicit:
         return [explicit]
     today = datetime.now(timezone.utc).date()
-    return [today - timedelta(days=i) for i in range(0, 5)]
+    n = lookback_days if lookback_days is not None else get_settings().cn_dump_lookback_days
+    n = max(1, int(n))
+    return [today - timedelta(days=i) for i in range(0, n)]
+
+
+def _probe_zip(client: httpx.Client, url: str) -> bool:
+    """True if the remote zip exists (HEAD, then ranged GET for picky CDNs)."""
+    try:
+        r = client.head(url)
+        if r.status_code == 200:
+            return True
+        r = client.get(url, headers={"Range": "bytes=0-0"})
+        return r.status_code in (200, 206)
+    except httpx.HTTPError as e:
+        log.debug("probe %s failed: %s", url, e)
+        return False
+
+
+def dump_day_ready(client: httpx.Client, day: date) -> bool:
+    """A dump day is usable only if notes and status shards are both published."""
+    ymd = f"{day.year:04d}/{day.month:02d}/{day.day:02d}"
+    base = _base_url()
+    notes = f"{base}/{ymd}/notes/notes-00000.zip"
+    status = f"{base}/{ymd}/noteStatusHistory/noteStatusHistory-00000.zip"
+    if not _probe_zip(client, notes):
+        return False
+    if not _probe_zip(client, status):
+        log.info("CN dump %s incomplete (notes yes, status missing)", day.isoformat())
+        return False
+    return True
+
+
+def latest_dump_day(client: httpx.Client, *, lookback_days: int | None = None) -> date | None:
+    """Most recent ready dump in the lookback window, or None."""
+    for d in candidate_dates(lookback_days=lookback_days):
+        if dump_day_ready(client, d):
+            return d
+    return None
 
 
 def download_file(url: str, dest: Path, client: httpx.Client) -> bool:
@@ -75,26 +115,20 @@ def extract_tsv_from_zip(zip_path: Path, dest_tsv: Path) -> Path:
 
 
 def resolve_dump_day(client: httpx.Client, day: date | None = None) -> date:
-    """Find a date that has notes-00000.zip."""
-    for d in candidate_dates(day):
-        ymd = f"{d.year:04d}/{d.month:02d}/{d.day:02d}"
-        url = f"{BASE}/{ymd}/notes/notes-00000.zip"
-        try:
-            r = client.head(url)
-            if r.status_code == 200:
-                return d
-            # some CDNs dislike HEAD — try GET range
-            r = client.get(url, headers={"Range": "bytes=0-0"})
-            if r.status_code in (200, 206):
-                return d
-        except httpx.HTTPError as e:
-            log.debug("probe %s failed: %s", url, e)
-    raise RuntimeError(f"No CN dump day found under {BASE}")
+    """Find a ready dump day, or raise if none in the lookback window."""
+    if day is not None:
+        if dump_day_ready(client, day):
+            return day
+        raise RuntimeError(f"No complete CN dump for {day.isoformat()} under {_base_url()}")
+    found = latest_dump_day(client)
+    if found is None:
+        raise RuntimeError(f"No CN dump day found under {_base_url()}")
+    return found
 
 
 def iter_shard_urls(day: date, folder: str, prefix: str) -> list[str]:
     ymd = f"{day.year:04d}/{day.month:02d}/{day.day:02d}"
-    return [f"{BASE}/{ymd}/{folder}/{prefix}-{i:05d}.zip" for i in range(MAX_SHARDS)]
+    return [f"{_base_url()}/{ymd}/{folder}/{prefix}-{i:05d}.zip" for i in range(MAX_SHARDS)]
 
 
 def download_and_extract_shard(

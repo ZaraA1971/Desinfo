@@ -189,3 +189,7 @@ media:
   domains:
   - alternatives-economiques.fr
   x_handle: AlterEco_fr
+- id: soyons_precis_gv
+  name: Soyons précis
+  domains: []
+  x_handle: SoyonsPrecisGv

@@ -6,6 +6,7 @@ After=network.target
 Type=oneshot
 WorkingDirectory=/srv/desinfo
 EnvironmentFile=-/srv/desinfo/.env
+EnvironmentFile=-/srv/ops/incident-hub/.env
 Environment=DESINFO_ROOT=/srv/desinfo
 ExecStart=/srv/desinfo/venv/bin/python /srv/desinfo/scripts/run_weekly.py
 Nice=10

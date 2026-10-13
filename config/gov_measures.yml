@@ -1,0 +1,21 @@
+# Mesures d'État visibles dans le code public X (x-algorithm).
+# L'UI observe le snapshot ; ce fichier décrit les mesures déjà identifiées.
+# Les nouveaux filtres *election_filter.rs (etc.) sont aussi découverts tout seuls.
+
+source_repo: https://github.com/xai-org/x-algorithm
+raw_base: https://raw.githubusercontent.com/xai-org/x-algorithm/main
+blob_base: https://github.com/xai-org/x-algorithm/blob/main
+filters_api: https://api.github.com/repos/xai-org/x-algorithm/contents/home-mixer/filters
+
+measures:
+  - id: brazil_2026_election
+    country_code: BR
+    country: Brésil
+    authority: Tribunal électoral (TSE)
+    title: Élections 2026
+    effect: Retiré du fil Pour toi, sauf si on suit déjà le compte
+    effect_code: for_you_exclude_unless_followed
+    legal_basis: Loi électorale brésilienne
+    source_path: home-mixer/filters/brazil_2026_election_filter.rs
+    announced_at: "2026-08-14"
+    parser: handle_comment_user_id

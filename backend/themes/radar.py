@@ -1,25 +1,11 @@
 """Radar profile: thematic CN weights per media (branch ∝ CN count)."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any
 
 from backend.themes.taxonomy import RADAR_THEMES, THEME_LABELS_FR
-
-_WINDOW_DAYS = {"7d": 7, "30d": 30, "90d": 90, "365d": 365}
-
-
-def _parse_window(window_key: str) -> int:
-    key = window_key.strip().lower()
-    if key not in _WINDOW_DAYS:
-        raise ValueError(f"Invalid window '{window_key}'")
-    return _WINDOW_DAYS[key]
-
-
-def _ms_since(days: int, now: datetime | None = None) -> int:
-    now = now or datetime.now(timezone.utc)
-    start = now - timedelta(days=days)
-    return int(start.timestamp() * 1000)
+from backend.windows.time import last_weekly_as_of, parse_window, window_ms_bounds
 
 
 def _media_attribution_stats(
@@ -27,6 +13,7 @@ def _media_attribution_stats(
     *,
     media_ids: list[str],
     since_ms: int,
+    until_ms: int,
 ) -> dict[str, dict[str, int]]:
     """Per media: attributed, classified, unclassified counts in window."""
     out = {mid: {"attributed": 0, "classified": 0, "unclassified": 0} for mid in media_ids}
@@ -43,11 +30,11 @@ def _media_attribution_stats(
         JOIN notes n ON n.note_id = nm.note_id
         LEFT JOIN note_theme nt ON nt.note_id = nm.note_id
         WHERE n.is_helpful = 1
-          AND n.created_at_ms >= ?
+          AND n.created_at_ms >= ? AND n.created_at_ms < ?
           AND nm.media_id IN ({placeholders})
         GROUP BY nm.media_id
         """,
-        [since_ms, *media_ids],
+        [since_ms, until_ms, *media_ids],
     ).fetchall()
     for r in rows:
         mid = r["media_id"]
@@ -68,6 +55,7 @@ def _politician_attribution_stats(
     *,
     politician_ids: list[str],
     since_ms: int,
+    until_ms: int,
 ) -> dict[str, dict[str, int]]:
     out = {
         pid: {"attributed": 0, "classified": 0, "unclassified": 0} for pid in politician_ids
@@ -85,11 +73,11 @@ def _politician_attribution_stats(
         JOIN notes n ON n.note_id = np.note_id
         LEFT JOIN note_theme nt ON nt.note_id = np.note_id
         WHERE n.is_helpful = 1
-          AND n.created_at_ms >= ?
+          AND n.created_at_ms >= ? AND n.created_at_ms < ?
           AND np.politician_id IN ({placeholders})
         GROUP BY np.politician_id
         """,
-        [since_ms, *politician_ids],
+        [since_ms, until_ms, *politician_ids],
     ).fetchall()
     for r in rows:
         pid = r["politician_id"]
@@ -110,6 +98,7 @@ def compute_media_theme_counts(
     *,
     media_ids: list[str],
     since_ms: int,
+    until_ms: int,
 ) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
     """Return ({media_id: {theme: cn_count}}, {media_id: autre_count})."""
     counts: dict[str, dict[str, int]] = {
@@ -126,11 +115,11 @@ def compute_media_theme_counts(
         JOIN notes n ON n.note_id = nm.note_id
         JOIN note_theme nt ON nt.note_id = nm.note_id
         WHERE n.is_helpful = 1
-          AND n.created_at_ms >= ?
+          AND n.created_at_ms >= ? AND n.created_at_ms < ?
           AND nm.media_id IN ({placeholders})
         GROUP BY nm.media_id, nt.theme
         """,
-        [since_ms, *media_ids],
+        [since_ms, until_ms, *media_ids],
     ).fetchall()
     for r in rows:
         mid = r["media_id"]
@@ -153,13 +142,15 @@ def build_radar_profiles(
     now: datetime | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Per-media radar: cn_count + weight (100 = thème le plus fort du média)."""
-    now = now or datetime.now(timezone.utc)
-    days = _parse_window(window_key)
-    since_ms = _ms_since(days, now)
+    now = now or last_weekly_as_of()
+    days = parse_window(window_key)
+    since_ms, until_ms = window_ms_bounds(days, now)
     theme_counts, autre_counts = compute_media_theme_counts(
-        conn, media_ids=media_ids, since_ms=since_ms
+        conn, media_ids=media_ids, since_ms=since_ms, until_ms=until_ms
     )
-    stats = _media_attribution_stats(conn, media_ids=media_ids, since_ms=since_ms)
+    stats = _media_attribution_stats(
+        conn, media_ids=media_ids, since_ms=since_ms, until_ms=until_ms
+    )
 
     profiles: dict[str, dict[str, Any]] = {}
     for mid in media_ids:
@@ -197,6 +188,7 @@ def compute_politician_theme_counts(
     *,
     politician_ids: list[str],
     since_ms: int,
+    until_ms: int,
 ) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
     """Return ({politician_id: {theme: cn_count}}, {politician_id: autre_count})."""
     counts: dict[str, dict[str, int]] = {
@@ -213,11 +205,11 @@ def compute_politician_theme_counts(
         JOIN notes n ON n.note_id = np.note_id
         JOIN note_theme nt ON nt.note_id = np.note_id
         WHERE n.is_helpful = 1
-          AND n.created_at_ms >= ?
+          AND n.created_at_ms >= ? AND n.created_at_ms < ?
           AND np.politician_id IN ({placeholders})
         GROUP BY np.politician_id, nt.theme
         """,
-        [since_ms, *politician_ids],
+        [since_ms, until_ms, *politician_ids],
     ).fetchall()
     for r in rows:
         pid = r["politician_id"]
@@ -240,14 +232,14 @@ def build_politician_radar_profiles(
     now: datetime | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Per-candidate radar: cn_count + weight (100 = thème le plus fort du candidat)."""
-    now = now or datetime.now(timezone.utc)
-    days = _parse_window(window_key)
-    since_ms = _ms_since(days, now)
+    now = now or last_weekly_as_of()
+    days = parse_window(window_key)
+    since_ms, until_ms = window_ms_bounds(days, now)
     theme_counts, autre_counts = compute_politician_theme_counts(
-        conn, politician_ids=politician_ids, since_ms=since_ms
+        conn, politician_ids=politician_ids, since_ms=since_ms, until_ms=until_ms
     )
     stats = _politician_attribution_stats(
-        conn, politician_ids=politician_ids, since_ms=since_ms
+        conn, politician_ids=politician_ids, since_ms=since_ms, until_ms=until_ms
     )
 
     profiles: dict[str, dict[str, Any]] = {}

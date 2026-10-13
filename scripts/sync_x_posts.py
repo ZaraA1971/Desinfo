@@ -13,9 +13,14 @@ sys.path.insert(0, str(ROOT))
 
 from backend.config import get_settings
 from backend.db import init_db
+from backend.politicians.rank import score_all_politicians_windows
 from backend.scoring.rank import score_all_windows
 from backend.x_client.client import XApiNotConfigured
-from backend.x_client.sync import cascade_longer_windows, sync_roster_post_counts
+from backend.x_client.sync import (
+    cascade_longer_windows,
+    cascade_politician_windows,
+    run_weekly_harvest,
+)
 
 
 def main() -> int:
@@ -39,8 +44,12 @@ def main() -> int:
     init_db()
 
     if args.cascade_only:
-        print(json.dumps(cascade_longer_windows(), indent=2, ensure_ascii=False))
-        paths = score_all_windows()
+        cascade = {
+            "cascade": cascade_longer_windows(),
+            "politicians_cascade": cascade_politician_windows(),
+        }
+        print(json.dumps(cascade, indent=2, ensure_ascii=False))
+        paths = score_all_windows() + score_all_politicians_windows()
         print("snapshots:", [str(p) for p in paths])
         return 0
 
@@ -48,24 +57,22 @@ def main() -> int:
         print("ERROR: X API non configurée (.env X_BEARER_TOKEN)", file=sys.stderr)
         return 2
 
-    windows = ["7d"]
-    if args.windows:
-        windows = args.windows
+    if args.windows and any(w != "7d" for w in args.windows):
+        logging.warning("--windows: API reste 7d ; cascade pour le reste")
     if args.all_windows:
         logging.warning("--all-windows: API reste 7d ; cascade pour le reste")
 
     try:
-        result = sync_roster_post_counts(windows=windows)
-        cascade = cascade_longer_windows()
+        result = run_weekly_harvest()
     except XApiNotConfigured as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
 
-    print(json.dumps({"sync": result, "cascade": cascade}, indent=2, ensure_ascii=False))
-    paths = score_all_windows()
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    paths = score_all_windows() + score_all_politicians_windows()
     print("snapshots:", [str(p) for p in paths])
 
-    if result.get("status") == "partial_credits_depleted":
+    if (result.get("sync") or {}).get("status") == "partial_credits_depleted":
         print(
             "WARNING: sync partiel — crédits X épuisés. "
             "Recharge puis relance (reprise auto des comptes manquants).",

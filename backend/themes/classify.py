@@ -9,7 +9,7 @@ from typing import Any
 
 from backend.config import get_settings
 from backend.db import SQLITE_IN_CHUNK, chunked, db_session, set_meta
-from backend.scoring.rank import WINDOW_DAYS, _ms_since
+from backend.scoring.rank import WINDOW_DAYS, cn_window_bounds, window_as_of
 from backend.themes.openai_chat import post_chat_completion
 from backend.themes.taxonomy import ALL_THEMES, RADAR_THEMES, normalize_theme
 
@@ -22,32 +22,44 @@ Pour chaque item tu reçois le POST (tweet original) et la NOTE (correction Comm
 Thèmes autorisés (ids exacts uniquement) :
 {", ".join(ALL_THEMES)}
 
+Critère unique (médias et personnalités) :
+classe uniquement le sujet du fait corrigé. Qui parle (média, élu, parti, @handle) ne change jamais le thème. Une note sur un élu se classe exactement comme si le même fait venait d’un média.
+
 Méthode (dans cet ordre) :
 1) Quelle est l’affirmation trompeuse du POST ?
 2) Que corrige réellement la NOTE — le cœur de la rectification ?
-3) Choisis le thème de ce cœur, pas le décor (lieu, événement, marque, sport, etc. mentionnés en arrière-plan).
-Ne te fie pas au média cité ni à la langue. Si le post est absent, classe à partir de la note seule.
+3) Choisis le thème de ce cœur, pas le décor (lieu, événement, marque, sport, personnalité citée, etc.).
+Ne te fie pas au média cité, au compte auteur, ni à la langue. Si le post est absent, classe à partir de la note seule.
+
+Règle anti-biais (critique) :
+- La présence d’un·e politicien·ne, d’un parti ou d’un @handle politique N’EST PAS un motif pour choisir « politique ».
+- Classe selon la substance du fait corrigé. Un élu qui parle du nucléaire, de l’Ukraine, d’un fake IA ou d’un prix → science / international / technologie / economie selon le cœur.
+- « politique » seulement si le cœur est vraiment institutionnel/partisan : élections, mandats, carrière, votes au Parlement comme acte partisan, sondages d’intentions, appartenance/parti.
 
 Définitions (par nature du sujet corrigé) :
-- politique : vie politique (surtout FR) — partis, élections, gouvernement, parlement, personnalités politiques, sondages, discours partisans. Un politicien FR/UE comme sujet principal → politique, même si le propos porte sur l’étranger.
+- politique : élections, mandats, partis, gouvernement/parlement comme institutions, carrière politique, sondages d’intentions, discours purement partisans. PAS le simple fait qu’un élu soit cité. PAS une polémique de personne si un autre sujet factuel existe (Cuba, fake visuel, affaire judiciaire, compte X, etc.).
 - sante : santé publique, médecine, vaccins, hôpitaux, épidémies, médicaments. Pas un fait divers avec blessé si le cœur n’est pas médical.
-- economie : entreprises, marchés, finance, inflation, budget, emploi, commerce.
+- economie : entreprises, marchés, finance, inflation, budget chiffré, emploi, commerce, subventions, coûts.
 - justice : procédures judiciaires, tribunaux, peines, enquêtes formelles, procès. Crime isolé sans angle judiciaire → faits_divers.
-- international : géopolitique, guerres, diplomatie, États, conflits — sans que le cœur soit une polémique partisane FR.
-- science : recherche, climat/environnement scientifique, espace, études. Pseudo-science → science.
-- technologie : nature technique ou numérique de la tromperie ou du sujet (fabrication synthétique, plateformes, cybersécurité, bugs, robots, etc.). Si le décor est géopolitique mais que la note porte sur l’artefact technique → technologie.
-- faits_divers : accidents, incendies, crimes isolés, divertissement/sport comme sujet principal (pas simple décor), scènes locales trompeuses sans enjeu politique/international.
-- autre : meta-média, humour sans enjeu, ou vraiment hors des axes — seulement si aucun autre thème ne décrit le cœur de la correction.
+- international : géopolitique, guerres, diplomatie, États, conflits, OTAN, Ukraine/Russie/Moyen-Orient — même si un politicien FR commente.
+- science : recherche, climat/environnement scientifique, énergie nucléaire comme fait scientifique/technique, espace, études. Pseudo-science → science.
+- technologie : média fabriqué / synthétique / IA, plateformes, cybersécurité, bugs, robots. Si la note porte sur l’artefact technique → technologie (même si un politicien apparaît sur l’image).
+- faits_divers : accidents, incendies, crimes isolés, people/divertissement/sport comme sujet principal, scènes locales trompeuses.
+- autre : meta-média, humour sans enjeu, ou vraiment hors des axes — seulement en dernier recours.
 
 Ambiguïté : préférer le thème le plus spécifique au cœur de la correction ; autre en dernier recours.
-Si un élément du décor entre en conflit avec le cœur, le cœur gagne toujours.
+Si un élément du décor (y compris un politicien) entre en conflit avec le cœur, le cœur gagne toujours.
 
 Exemples de raisonnement :
-- Personnalité politique FR + propos sur l’étranger → politique (cœur = l’acteur politique)
-- Conflit / État au centre de la tromperie → international
-- Note qui établit surtout qu’un média est fabriqué / synthétique / truqué techniquement → technologie (même si le décor est un stade, une guerre ou un animal)
+- Élu FR qui commente l’Ukraine / la Crimée / l’OTAN → international (cœur = géopolitique)
+- Élu FR + affirmation sur le nucléaire, le climat, les canicules → science
+- Note qui établit surtout qu’un média est fabriqué / synthétique / truqué / pastiche → technologie (même si un politicien est sur l’image)
+- Correction sur un coût, une subvention, un chiffre économique → economie
+- Mandats cumulés, parachutage, sondage présidentiel, vote de parti → politique
+- Condamnation / peine / tribunal / mise en examen / affaire judiciaire → justice
+- Bilan d’un régime étranger (Castro, Cuba, droits humains) même cité par un élu FR → international
+- Compte X toujours actif / visuel satirique / pastiche d’antenne → technologie
 - Incendie local présenté à tort comme une attaque militaire → international si la tromperie porte sur le conflit ; faits_divers si le cœur est juste la mauvaise scène locale
-- Contrats tech + conflit géopolitique au centre → international
 
 Réponds UNIQUEMENT un JSON array valide :
 [{{"id":"<note_id>","theme":"<id>"}}]
@@ -79,19 +91,21 @@ def _attributed_clause() -> str:
 
 
 def _classify_window_key(window_key: str | None) -> str:
-    """
-    Weekly moisson = 7d only. Maintenance (reclassif homogène) may use
-    30d/90d/365d/all — longer UI windows then reuse stored note_theme.
-    """
+    """Only the 7d window classifies. 30d/90d/365d reuse stored note_theme."""
     key = (window_key or "7d").strip().lower()
-    if key == "all":
-        return key
-    if key not in WINDOW_DAYS:
+    if key != "7d":
         raise ValueError(
-            f"theme classification window must be one of "
-            f"{sorted(WINDOW_DAYS)} or 'all', got {window_key!r}"
+            f"theme classification is 7d only (longer windows reuse stored themes), got {window_key!r}"
         )
     return key
+
+
+def _classify_window_filter(
+    window_key: str, now: datetime | None = None
+) -> tuple[str, list[Any]]:
+    as_of = now or window_as_of(window_key)
+    since_ms, until_ms = cn_window_bounds(WINDOW_DAYS[window_key], as_of)
+    return "n.created_at_ms >= ? AND n.created_at_ms < ?", [since_ms, until_ms]
 
 
 def _scope_filters(
@@ -141,9 +155,9 @@ def pending_attributed_notes(
     politician_ids: set[str] | None = None,
     now: datetime | None = None,
 ) -> list[dict[str, str]]:
-    """HELPFUL notes in the classify window (7d) linked to media or politician."""
+    """HELPFUL notes in the classify window linked to a media or politician."""
     window_key = _classify_window_key(window_key)
-    since_ms = 0 if window_key == "all" else _ms_since(WINDOW_DAYS[window_key], now)
+    win_sql, win_params = _classify_window_filter(window_key, now)
     attributed = _attributed_clause()
 
     if note_ids is not None and not note_ids:
@@ -176,13 +190,13 @@ def pending_attributed_notes(
                     SELECT DISTINCT n.note_id, n.summary, n.tweet_id
                     FROM notes n
                     WHERE n.is_helpful = 1
-                      AND n.created_at_ms >= ?
+                      AND {win_sql}
                       AND {attributed}
                       {scope_sql}
                     ORDER BY n.created_at_ms DESC
                     LIMIT ?
                     """,
-                    (since_ms, *scope_params, remain),
+                    (*win_params, *scope_params, remain),
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -191,14 +205,14 @@ def pending_attributed_notes(
                     FROM notes n
                     LEFT JOIN note_theme nt ON nt.note_id = n.note_id
                     WHERE n.is_helpful = 1
-                      AND n.created_at_ms >= ?
+                      AND {win_sql}
                       AND nt.note_id IS NULL
                       AND {attributed}
                       {scope_sql}
                     ORDER BY n.created_at_ms DESC
                     LIMIT ?
                     """,
-                    (since_ms, *scope_params, remain),
+                    (*win_params, *scope_params, remain),
                 ).fetchall()
             for r in rows:
                 nid = r["note_id"]
@@ -219,7 +233,7 @@ def pending_attributed_notes(
 def count_pending_themes(*, window_key: str = "7d", now: datetime | None = None) -> int:
     """Unclassified attributed notes in the classify window (default 7d)."""
     window_key = _classify_window_key(window_key)
-    since_ms = 0 if window_key == "all" else _ms_since(WINDOW_DAYS[window_key], now)
+    win_sql, win_params = _classify_window_filter(window_key, now)
     with db_session() as conn:
         return int(
             conn.execute(
@@ -228,36 +242,13 @@ def count_pending_themes(*, window_key: str = "7d", now: datetime | None = None)
                 FROM notes n
                 LEFT JOIN note_theme nt ON nt.note_id = n.note_id
                 WHERE n.is_helpful = 1
-                  AND n.created_at_ms >= ?
+                  AND {win_sql}
                   AND nt.note_id IS NULL
                   AND {_attributed_clause()}
                 """,
-                (since_ms,),
+                win_params,
             ).fetchone()["n"]
         )
-
-
-def list_attributed_note_ids(
-    *,
-    window_key: str = "365d",
-    now: datetime | None = None,
-) -> list[str]:
-    """All HELPFUL attributed note ids in window (for maintenance reclassif)."""
-    window_key = _classify_window_key(window_key)
-    since_ms = 0 if window_key == "all" else _ms_since(WINDOW_DAYS[window_key], now)
-    with db_session() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT DISTINCT n.note_id
-            FROM notes n
-            WHERE n.is_helpful = 1
-              AND n.created_at_ms >= ?
-              AND {_attributed_clause()}
-            ORDER BY n.created_at_ms DESC
-            """,
-            (since_ms,),
-        ).fetchall()
-    return [str(r["note_id"]) for r in rows]
 
 
 def _classify_batch(batch: list[dict[str, str]], settings) -> dict[str, str]:
@@ -337,7 +328,7 @@ def classify_pending_notes(
     media_ids: set[str] | None = None,
     politician_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Classify attributed notes in the current 7d window only (weekly moisson)."""
+    """Classify notes that still have no theme. Weekly moisson uses the 7d window."""
     settings = get_settings()
     if not settings.openai_configured:
         return {

@@ -55,18 +55,15 @@ def main() -> int:
     print("roster_size:", len(roster.get("media") or []))
 
     if not args.skip_themes:
-        touched: set[str] | None = None
-        if result.get("status") == "ok" and result.get("touched_note_ids"):
-            touched = set(result["touched_note_ids"])
-        themes = classify_pending_notes(limit=args.theme_limit, note_ids=touched)
+        themes = classify_pending_notes(limit=args.theme_limit, window_key="7d")
         print("themes:", themes)
     else:
         print("themes: skipped")
 
     if args.with_x_sync and settings.x_api_configured:
-        from backend.x_client.sync import sync_roster_post_counts
+        from backend.x_client.sync import sync_all_post_counts
 
-        xres = sync_roster_post_counts(windows=["7d"])
+        xres = sync_all_post_counts(windows=["7d"])
         print("x_sync:", xres)
 
     # Cheap: refresh longer windows if daily history already allows it

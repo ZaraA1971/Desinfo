@@ -14,7 +14,7 @@ Référence **canonique** pour plans et implémentation. Domaine public : `desin
 5. **Pipeline souverain** — Ordre fixe : `download → parse → attribute → score → snapshot → API → UI`.
 6. **Config centralisée** — `.env` + `config/*.yml` ; pas de magic numbers dispersés.
 7. **Notes comptées** — Uniquement statut `CURRENTLY_RATED_HELPFUL` (via `noteStatusHistory`).
-8. **Métrique** — Principale : `CN / posts` (`rate_cn_per_post`, plus haut = plus densément noté). Secondaire : `posts / CN`. Sans API X : `metric_mode=cn_only`. **Fenêtre opérationnelle = `7d`** (défaut UI + moisson X). Les fenêtres `30d` / `90d` / `365d` = **cascade** posts depuis `*_posts_daily` (0 crédit API) + CN glissants SQLite — jamais de sync X longue.
+8. **Métrique** — Principale : `CN / posts` (`rate_cn_per_post`, plus haut = plus densément noté). Secondaire : `posts / CN`. Sans API X : `metric_mode=cn_only`. **Fenêtre opérationnelle = `7d`** = **lundi 06:00 UTC → lundi 06:00 UTC** (même heure que le timer). `30d` / `90d` / `365d` = **accumulation** des moissons (cascade posts `*_posts_daily` + CN coupés au même lundi 06:00) — jamais de sync X longue.
 9. **Attribution V1** — Domaines dans le texte des notes → `config/media_domains.yml` → média. Pas de lookup tweet sans API.
 10. **Formules métier** — Une seule implémentation dans `backend/scoring/`.
 11. **Diagnostics** — Logs journald / `data/` ; flag `DESINFO_DEBUG=1` pour verbosité.
@@ -30,6 +30,8 @@ Référence **canonique** pour plans et implémentation. Domaine public : `desin
 | `backend/x_client/` | Client API X (timelines, counts) |
 | `config/media_domains.yml` | Seed domaines FR → média |
 | `config/media_roster.yml` | Starter set souverain (issu du bootstrap 365 j) |
+| `backend/gov/` | Demandes des États : lecture du code public X (`x-algorithm`) |
+| `config/gov_measures.yml` | Mesures déjà identifiées (Brésil 2026, etc.) |
 | `frontend/` | Next.js App Router — palmarès public |
 | `infra/systemd/` | Units API, frontend, ingest timer |
 | `deploy/nginx/` | Vhost TLS `desinfo.electronlibre.info` |
@@ -58,6 +60,7 @@ download CN dump → parse notes + status → filter HELPFUL
 | FastAPI | `127.0.0.1:8700` | `desinfo-api` |
 | Next.js | `127.0.0.1:8710` | `desinfo-frontend` |
 | Moisson hebdo | oneshot Mon 06:00 UTC | `desinfo-x-sync.timer` → `run_weekly.py` |
+| Vigie | fin de `run_weekly.py` | état complet poussé (succès **et** échec) via `backend/vigie_notify.py` |
 
 ## Relance services
 
@@ -105,7 +108,7 @@ OPENAI_MODEL=gpt-5.4
 DESINFO_THEME_BATCH_SIZE=20
 DESINFO_THEME_MAX_PER_RUN=800
 DESINFO_X_ALLOW_TIMELINE=0
-DESINFO_X_SYNC_MIN_AGE_HOURS=168
+DESINFO_X_SYNC_MIN_AGE_HOURS=1
 DESINFO_THEME_X_FETCH=cache_only
 ```
 
@@ -125,15 +128,15 @@ Tarification X (pay-per-use, juil. 2026) — **ordre de coût** :
 
 Variables :
 - `DESINFO_X_ALLOW_TIMELINE=0` — pas de fallback timeline.
-- `DESINFO_X_SYNC_MIN_AGE_HOURS=168` — skip resync si déjà fait cette semaine.
+- `DESINFO_X_SYNC_MIN_AGE_HOURS` — `0` = forcer. Sinon skip **seulement** si les jours de **cette** semaine de cut sont déjà en base. Jamais un délai mur 168 h (le timer peut démarrer plus tôt et tout sauter).
 - `DESINFO_THEME_X_FETCH=cache_only|fetch|never` — texte tweet pour LLM.
 
 - **API X = 7d only** via `counts/recent` (1 req/handle unique, médias+candidats dédupliqués).
 - **Timer** : `desinfo-x-sync.timer` — **lundi 06:00 UTC** → `scripts/run_weekly.py`.
 - Stocke les buckets jour dans `media_posts_daily` + fenêtre `7d`.
 - **Cascade** (0 crédit) : somme des jours → `30d` / `90d` / `365d` dès que couverture ≥ `DESINFO_CASCADE_COVERAGE` (défaut 0.7). Remplissage **semaine par semaine** (1 moisson 7j = ~7 buckets/jour/compte).
-- UI : fenêtres 30/90/365 **grisées et non cliquables** tant que `windows_status[w].available` est false (`/api/meta`).
-- CN : fenêtres glissantes recalculées au score depuis SQLite — pas d’ingest quotidien. **Toujours parler CN sur la fenêtre demandée** (prod = `7d`) ; ne pas citer `cn_365d` du roster comme métrique live.
+- UI : fenêtres 30/90/365 **grisées** tant que la couverture n’est pas là (`DESINFO_CASCADE_COVERAGE`, défaut 0.7). Pas assez = on n’ouvre pas. Une fenêtre déjà remplie (cascade écrite) **reste ouverte**. Premier remplissage = cascade au seuil ; ensuite on met à jour même en-dessous. Horloge unique : `backend/windows/time.py`. Couverture unique : `backend/windows/coverage.py` (cascade, skip X, statut UI).
+- Moisson = **lundi 06:00 UTC** (pas l’heure réelle du job). `7d` = la semaine lundi→lundi qui vient de se terminer. Si ce créneau n’a pas encore de notes, on compte la **semaine passée** ; la date de moisson reste aujourd’hui. `30d`/`90d`/`365d` = accumulation coupée au même lundi 06:00. Un rescore en semaine ne glisse pas. Pas d’ingest quotidien. **Toujours parler CN sur la fenêtre demandée** (prod = `7d`) ; ne pas citer `cn_365d` du roster comme métrique live.
 
 ## Procédure — ajouter des comptes
 
@@ -216,14 +219,14 @@ cd /srv/desinfo
 ./venv/bin/python -c "
 from backend.x_client.sync import sync_all_post_counts, cascade_longer_windows
 from backend.scoring.rank import score_all_windows
-print(sync_all_post_counts(windows=['7d'], force_media_ids={'mon_media'}))
+print(sync_all_post_counts(windows=['7d']))
 print(cascade_longer_windows())
 print(score_all_windows(['7d']))
 "
 sudo systemctl restart desinfo-api
 ```
 
-Les **médias** déjà sync < `DESINFO_X_SYNC_MIN_AGE_HOURS` (168 h) sont **skippés** (tous leurs handles ombrelle inclus). Forcer : `force_media_ids={'id'}`. **1 req / @handle** unique. Pas de timeline.
+Les **médias** déjà moissonnés **cette semaine de cut** (lundi 06:00) sont **skippés** (tous leurs handles ombrelle inclus). `DESINFO_X_SYNC_MIN_AGE_HOURS=0` pour forcer. **1 req / @handle** unique. Pas de timeline.
 
 5. Contrôle (fenêtre live = **7d**) :
 
@@ -283,7 +286,7 @@ print("cascade:", cascade_politician_windows())
 print("snapshots:", [str(p) for p in score_all_politicians_windows()])
 PY
 sudo systemctl restart desinfo-api
-# Posts 7d : moisson hebdo (médias+candidats dédupliqués) ou sync_all_post_counts(force_politician_ids=…)
+# Posts 7d : moisson hebdo (médias+candidats dédupliqués) ou DESINFO_X_SYNC_MIN_AGE_HOURS=0 + sync_all_post_counts()
 ```
 
 Contrôle : `GET /api/ranking?window=7d&kind=politicians`.
@@ -300,13 +303,13 @@ Contrôle : `GET /api/ranking?window=7d&kind=politicians`.
 
 - Axes : politique, santé, économie, justice, international, science, technologie, faits divers (+ `autre` hors radar).
 - Sens : **longueur ∝ nombre de CN** sur le thème (max = bord ; 0 reste à 25 % du rayon).
-- Classification : LLM en fin de moisson hebdo — **fenêtre 7j courante seulement** (notes média ou candidat sans thème).
+- Classification : LLM en fin de moisson hebdo — **fenêtre 7 j seulement** (notes média ou candidat sans thème).
+  Le thème est **persisté** une fois. Le 30 j, le 90 j et l’année **ajoutent** ces thèmes déjà rangés : ils ne reclassent pas.
   Prompt agnostique : classer selon le **cœur de la correction** (pas le décor / mots-clés incidental) — `backend/themes/classify.py` `SYSTEM_PROMPT`.
-  Modèle : `OPENAI_MODEL` (prod = `gpt-5.4`). Hebdo = **7d** seulement ; 30/90/365 réutilisent `note_theme`.
+  Modèle : `OPENAI_MODEL` (prod = `gpt-5.4`).
   **Nouvel entrant** : lancer tout de suite `classify_pending_notes(media_ids=…)` / `(politician_ids=…)` (voir procédure ci-dessus) — ne pas attendre le lundi.
-  **Reclassif homogène** (changement prompt/modèle) :
-  `DESINFO_THEME_X_FETCH=cache_only ./venv/bin/python scripts/classify_themes.py --reclassify-all-in-window --window 365d`
-  (évite de brûler des crédits X ; tweets absents du cache → note seule).
+  **Reclassif** (changement de prompt, semaine courante seulement) :
+  `DESINFO_THEME_X_FETCH=cache_only ./venv/bin/python scripts/classify_themes.py --force`
 - Agrégation : `build_radar_profiles` (médias), `build_politician_radar_profiles` (candidats).
 - Snapshots : chaque item inclut `radar.axes[]` (`cn_count`, `weight`).
 - UI : clic ligne → panneau radar (médias et candidats). Script manuel : `scripts/classify_themes.py`.
@@ -349,6 +352,12 @@ Contrôle : `GET /api/ranking?window=7d&kind=politicians`.
 - Helper `backend/db.py` : `chunked` / `execute_by_ids` / `fetchall_by_ids` (`SQLITE_IN_CHUNK=500`) pour attribution médias/candidats et scope thèmes.
 - Échec d’attribution **après** commit par jour : les dumps sont déjà en base (`last_dump_date` avancé) — relancer un backfill `attribute_notes()` / `attribute_politicians()` (notes sans lien) puis moisson thèmes/X/score.
 
+## CookieYes + analytics
+
+- **CookieYes** : même compte / clé qu’ElectronLibre (`EL_COOKIEYES_WEBSITE_KEY` ou `NEXT_PUBLIC_COOKIEYES_WEBSITE_KEY`) — composant `frontend/src/components/CookieYes.tsx`, chargé `beforeInteractive` **avant** GoatCounter.
+- Domaine à autoriser dans le dashboard CookieYes : `desinfo.electronlibre.info` (sinon bannière absente / scripts non gérés).
+- **GoatCounter** : même site `electronlibre.goatcounter.com`, path préfixé par host (`frontend/src/components/GoatCounter.tsx`).
+
 ## Open source
 
 - Dépôt public : [github.com/ZaraA1971/Desinfo](https://github.com/ZaraA1971/Desinfo)
@@ -380,18 +389,18 @@ pipelines d'attribution indépendants (aucun ne touche les tables de l'autre) :
 | `data/snapshots/latest_{window}.json` | `data/snapshots/latest_politicians_{window}.json` (+ `"kind": "politicians"`) |
 
 - `backend/ingest/pipeline.py` : `attribute_politicians(conn)` appelé juste après `attribute_notes(conn)` (même transaction) ; résultat inclut `note_politician_links`.
-- `backend/x_client/sync.py` : `sync_politicians_post_counts()` + `cascade_politician_windows()` miroir médias ; `run_weekly_harvest()` enchaîne médias puis politiques.
+- `backend/x_client/sync.py` : un seul chemin `sync_all_post_counts()` (médias+candidats, 1 req/@handle) puis `cascade_longer_windows()` / `cascade_politician_windows()`. Horloge unique : `backend/windows/time.py`. Couverture unique : `backend/windows/coverage.py`.
 - `scripts/run_weekly.py` : pipeline hebdo (CN → thèmes → X → cascade → score). `ingest_daily.py` = CN seul (manuel).
-- **UI** : onglets Médias | Candidats 2027 ; `GET /api/ranking?kind=politicians&window=` ; défaut fenêtre = **7d** (même logique que médias).
+- **UI** : onglets Médias | Candidats 2027 | Demandes des États ; `GET /api/ranking?kind=politicians&window=` ; défaut fenêtre = **7d** (même logique que médias).
+- **Demandes des États** : `GET /api/gov` lit `data/snapshots/latest_gov.json`. Source = fichiers publics `xai-org/x-algorithm` (pas d’API X). Catalogue `config/gov_measures.yml` + découverte des nouveaux `*_election_filter.rs`. Moisson dans `run_weekly.py` / `scripts/sync_gov.py`. L’UI **observe** le snapshot. Ce n’est **pas** un inventaire des posts retirés.
 - Attribution CN candidats = texte/@handles uniquement (pas de lookup tweet).
 
 ## Ingest CN (détails)
 
-- **Incrémental** : seuls les dumps **postérieurs** à `last_dump_date` (meta) sont téléchargés/parsés ; skip si déjà à jour. Legacy : `last_dump_date` initialisé depuis `dump_date` au 1er run.
+- **Incrémental** : scan de chaque jour **après** `last_dump_date` jusqu’à aujourd’hui. Jours absents ou incomplets = skip. Rien de nouveau = ingest `skipped`, la moisson X / score continue. 1ère moisson : dernier dump prêt dans `DESINFO_CN_LOOKBACK_DAYS` (21). Legacy : `last_dump_date` depuis `dump_date`.
 - Un jour n’est « prêt » que si `notes-00000.zip` **et** `noteStatusHistory-00000.zip` sont publiés (sinon skip — au petit matin UTC le status peut manquer encore). Commit **par jour** pour ne pas perdre les dumps déjà OK.
-- 1ère moisson : dernier dump disponible ; ensuite +1 dump/jour max par semaine (rattrapage si retard).
 - Attribution médias/candidats : **notes touchées uniquement** (rebuild complet si hash roster change).
-- Thèmes LLM : **7j courants**, notes sans `note_theme` ; après ingest, filtre sur `touched_note_ids` quand disponible.
+- Thèmes LLM : **7 j courants**, notes sans `note_theme`. Le 30 j / 90 j / 365 j réutilisent le thème persisté.
 - Moisson X : **1 req/@handle/semaine** (`counts/recent`) ; skip si `synced_at` récent ; 30/90/365 = cascade `*_posts_daily` (zéro API).
 - URL : `https://ton.twimg.com/birdwatch-public-data/YYYY/MM/DD/{notes|noteStatusHistory}/*.zip`
 - Pipeline disque : status → set HELPFUL → delete ; chaque shard notes → upsert HELPFUL only → delete.

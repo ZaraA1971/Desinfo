@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import date, datetime, timezone
-from pathlib import Path
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 
 from backend.config import get_settings
-from backend.ingest.download import resolve_dump_day
+from backend.ingest.download import dump_day_ready, latest_dump_day
 
 log = logging.getLogger("desinfo.ingest.incremental")
 
@@ -28,30 +27,37 @@ def list_incremental_dump_days(
     last_dump_date: date | None,
 ) -> list[date]:
     """
-    Dump days to ingest since last_dump_date (exclusive) through latest available.
-    First run: latest dump only. Up-to-date: [].
+    Dump days to ingest since last_dump_date (exclusive) through today.
+    First run: latest ready dump only. Already up to date / nothing new: [].
+    Missing or incomplete days are skipped — never raises for a publication gap.
     """
-    latest = resolve_dump_day(client)
+    today = datetime.now(timezone.utc).date()
     if last_dump_date is None:
+        latest = latest_dump_day(client)
+        if latest is None:
+            raise RuntimeError("No CN dump day found (first ingest)")
         log.info("first ingest — latest dump %s", latest.isoformat())
         return [latest]
-    if last_dump_date >= latest:
-        log.info("CN dump up to date (last=%s latest=%s)", last_dump_date, latest)
-        return []
 
     days: list[date] = []
-    d = last_dump_date
-    from datetime import timedelta
-
-    d = d + timedelta(days=1)
-    while d <= latest:
-        try:
-            resolve_dump_day(client, d)
+    d = last_dump_date + timedelta(days=1)
+    while d <= today:
+        if dump_day_ready(client, d):
             days.append(d)
-        except RuntimeError:
+        else:
             log.warning("skip missing dump day %s", d.isoformat())
-        d = d + timedelta(days=1)
-    log.info("incremental dump days: %s → %s (%s days)", last_dump_date, latest, len(days))
+        d += timedelta(days=1)
+
+    if not days:
+        log.info("CN dump up to date or no new ready day (last=%s today=%s)", last_dump_date, today)
+        return []
+
+    log.info(
+        "incremental dump days: %s → %s (%s days)",
+        last_dump_date,
+        days[-1],
+        len(days),
+    )
     return days
 
 
