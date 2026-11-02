@@ -46,9 +46,10 @@ Note : la doc repo mentionne `/srv/desinfo` ; le service systemd pointe vers `/s
 ### Commits déployés
 
 1. `76f124802fd4e73190b88336886171807d0160f3` — Fix Desinfo SEO: SSR homepage, canonical, robots, sitemap  
-2. `1a64b071…` (HEAD branche) — Install frontend devDependencies during deploy builds  
+2. `1a64b070ac94b890187a1ee2449ae45a39f6d7b0` — Install frontend devDependencies during deploy builds  
+3. `aa576c5b42145eec9d5ebd0534f96a19d5896249` — Add Desinfo SEO deployment report (doc only)
 
-**Commit HEAD déployé** : `1a64b07` (`Install frontend devDependencies during deploy builds`), qui inclut le fix SEO `76f1248`.
+**Commit runtime déployé** : `1a64b070ac94b890187a1ee2449ae45a39f6d7b0` (build + restart `desinfo-frontend`).
 
 ## Tests et builds exécutés (avant déploiement)
 
