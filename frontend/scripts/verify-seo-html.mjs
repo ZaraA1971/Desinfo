@@ -24,6 +24,14 @@ function fetchText(urlPath) {
   });
 }
 
+function assertStatus(res, expected, label) {
+  if (res.status !== expected) {
+    throw new Error(
+      `SEO ${label} expected HTTP ${expected}, got ${res.status}`,
+    );
+  }
+}
+
 function assertIncludes(html, needle, label) {
   if (!html.includes(needle)) {
     throw new Error(`SEO HTML missing ${label}: ${JSON.stringify(needle)}`);
@@ -60,6 +68,7 @@ async function main() {
       }
     }
     const home = await fetchText("/");
+    assertStatus(home, 200, "/");
     assertIncludes(home.body, "Observatoire de la désinformation", "brand");
     assertIncludes(
       home.body,
@@ -72,10 +81,16 @@ async function main() {
     assertIncludes(home.body, "Méthodologie", "methodology");
 
     const robots = await fetchText("/robots.txt");
+    assertStatus(robots, 200, "/robots.txt");
     assertIncludes(robots.body, "Disallow: /api/", "robots api");
     const sitemap = await fetchText("/sitemap.xml");
+    assertStatus(sitemap, 200, "/sitemap.xml");
     assertIncludes(sitemap.body, "https://desinfo.electronlibre.info/", "sitemap");
-    console.log("OK SSR SEO HTML bytes=", home.body.length);
+    console.log(
+      "OK SSR SEO HTML bytes=",
+      home.body.length,
+      "status /robots/sitemap=200/200/200",
+    );
   } finally {
     server.kill("SIGTERM");
   }
