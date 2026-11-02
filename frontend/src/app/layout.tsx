@@ -1,6 +1,12 @@
 import { Libre_Baskerville, Source_Sans_3 } from "next/font/google";
 import type { Metadata, Viewport } from "next";
 import GoatCounter from "@/components/GoatCounter";
+import {
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_ORIGIN,
+  absoluteUrl,
+} from "@/lib/site";
 import "./globals.css";
 
 const display = Libre_Baskerville({
@@ -16,10 +22,25 @@ const body = Source_Sans_3({
 });
 
 export const metadata: Metadata = {
-  title: "Observatoire de la désinformation",
-  description:
-    "Palmarès roulant des médias français selon les Community Notes de X (densité CN / Posts).",
+  metadataBase: new URL(SITE_ORIGIN),
+  title: {
+    default: SITE_NAME,
+    template: `%s · ${SITE_NAME}`,
+  },
+  description: SITE_DESCRIPTION,
   applicationName: "desinfo",
+  openGraph: {
+    type: "website",
+    locale: "fr_FR",
+    url: absoluteUrl("/"),
+    siteName: SITE_NAME,
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
   icons: {
     icon: [
       { url: "/icon.svg", type: "image/svg+xml" },
