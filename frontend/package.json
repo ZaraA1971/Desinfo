@@ -6,7 +6,9 @@
     "dev": "next dev -p 8710",
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 8710",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "npm run build && node --experimental-strip-types --test 'tests/**/*.test.mjs'",
+    "verify:seo-html": "node scripts/verify-seo-html.mjs"
   },
   "dependencies": {
     "next": "^15.0.0",
