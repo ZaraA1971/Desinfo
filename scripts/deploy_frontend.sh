@@ -17,7 +17,9 @@ if [[ -f "$ROOT/.env" ]]; then
 fi
 
 echo "Installing frontend dependencies…"
-npm ci 2>/dev/null || npm install
+# Next.js reads tsconfig path aliases via TypeScript (a devDependency).
+# Keep NODE_ENV=production for the build, but always install devDependencies.
+npm ci --include=dev 2>/dev/null || npm install --include=dev
 
 echo "Building frontend…"
 npm run build
